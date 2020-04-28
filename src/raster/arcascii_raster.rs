@@ -39,25 +39,25 @@ pub fn read_arcascii(
                 data.reserve(configs.rows * configs.columns);
             }
         } else if vec[0].to_lowercase().contains("xllcorner") {
-            xllcenter = vec[vec.len() - 1]
-                .trim()
-                .to_string()
-                .parse::<f64>()
-                .unwrap();
-        } else if vec[0].to_lowercase().contains("yllcorner") {
-            yllcenter = vec[vec.len() - 1]
-                .trim()
-                .to_string()
-                .parse::<f64>()
-                .unwrap();
-        } else if vec[0].to_lowercase().contains("xllcenter") {
             xllcorner = vec[vec.len() - 1]
                 .trim()
                 .to_string()
                 .parse::<f64>()
                 .unwrap();
-        } else if vec[0].to_lowercase().contains("yllcenter") {
+        } else if vec[0].to_lowercase().contains("yllcorner") {
             yllcorner = vec[vec.len() - 1]
+                .trim()
+                .to_string()
+                .parse::<f64>()
+                .unwrap();
+        } else if vec[0].to_lowercase().contains("xllcenter") {
+            xllcenter = vec[vec.len() - 1]
+                .trim()
+                .to_string()
+                .parse::<f64>()
+                .unwrap();
+        } else if vec[0].to_lowercase().contains("yllcenter") {
+            yllcenter = vec[vec.len() - 1]
                 .trim()
                 .to_string()
                 .parse::<f64>()
