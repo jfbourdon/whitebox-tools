@@ -2,42 +2,36 @@
 This tool is part of the WhiteboxTools geospatial analysis library.
 Authors: Jean-François Bourdon
 Created: 04/04/2022
-Last Modified: 04/04/2022
+Last Modified: 08/04/2022
 License: MIT
 */
 
-// IMPORT généraux
 use whitebox_raster::*;
+use whitebox_common::structures::BoundingBox;
+use whitebox_common::structures::Array2D;
 use crate::tools::*;
+use whitebox_vector::{FieldData, ShapeType, Shapefile};
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::env;
+use std::i32;
 use std::f64;
 use std::io::{Error, ErrorKind};
 use std::path;
 
-
-// IMPORT vector_lines_to_raster.rs
-use whitebox_common::structures::BoundingBox;
-use whitebox_vector::{FieldData, ShapeType, Shapefile};
-
-
-// IMPORT cost_distance.rs
-use whitebox_common::structures::Array2D;
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::i32;
-
-
-
-
-/// This tool decrements (lowers) the elevations of pixels within an input digital elevation model (DEM) (`--dem`)
-/// along an input vector stream network (`--streams`). The optional flat height increment value (`--flat_increment`)
-/// can be specified to control the pixel lowering rate. Notice that **if the `--flat_increment` parameter is not specified,
-/// the small number used to ensure flow across flats will be calculated automatically, which should be preferred in
-/// most applications** of the tool. Stream vectors can be processed in a specific order by providing to `--order_by`
-/// parameter the name of a numeric (integer) field from the attributes table. Processing is done in increasing order and
-/// follow the numerisation direction of each stream vector to decrement elevations (from upstream to downstream).
+/// This tool decrements (lowers) the elevation of pixels within an input digital elevation model (DEM) (`--dem`)
+/// along an input vector stream network (`--streams`) following the numerisation direction of each stream vector
+/// (from upstream to downstream). Streams can be processed in a specific order by providing to the `--order_by`
+/// parameter the name of a numeric (integer) field from the attributes table (ascending order).
+/// The optional flat height increment value (`--flat_increment`) can be specified to control
+/// the pixel lowering rate. Notice that if the `--flat_increment` parameter isn't specified,
+/// the output DEM will use 64-bit floating point values in order to make sure that the very small elevation increment
+/// value determined will be accurately stored. Consequently, it may double the storage requirements as DEMs are often
+/// stored with 32-bit precision. However, if a flat increment value is specified, the output DEM will keep the same data
+/// type as the input assuming the user chose its value wisely.
 ///
-/// All stream vectors must only cover valid cells (no NoData) from the DEM otherwise the tool is halted.
+/// Some restrictions to the stream vectors geometry are in place in order to prevent any guessing work. Streams must all
+/// be single part and only cover valid cells (no NoData) from the DEM.
 ///
 /// # See Also
 /// `BurnStreamsAtRoads`, `RasterStreamsToVector`, `RasterizeStreams`
@@ -254,19 +248,19 @@ impl WhiteboxTool for BurnStreams {
         }
 
         if verbose {
-            println!("Reading data...")
+            println!("Reading stream data...")
         };
         let streams = Shapefile::read(&streams_file).expect("Error reading input Shapefile.");
 
         let start = Instant::now();
 
-        // make sure the input vector file is of polyline type (eventually should explicitly
-        // look for LINESTRING only and not MULTILINESTRING)
+        // Make sure the input vector file is of polyline type
+        // Should explicitly look for LINESTRING only and not MULTILINESTRING ideally
         if streams.header.shape_type.base_shape_type() != ShapeType::PolyLine
         {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                "The input vector data must either be of polyline base shape type.",
+                "The input vector data must be of polyline base shape type.",
             ));
         }
 
@@ -287,24 +281,12 @@ impl WhiteboxTool for BurnStreams {
         if !streams.attributes.is_field_numeric(field_index) {
             // Warn user of non-numeric
             if verbose {
-                println!("Warning: Non-numeric attributes cannot be rasterized. FID will be used instead.");
+                println!("Warning: Non-numeric attributes cannot be used for ordering. FID will be used instead.");
             }
             field_name = "FID".to_string(); // Can't use non-numeric field; use FID instead.
         }
 
-        // Load reference raster
-        let mut dem = Raster::new(&dem_file, "r")?;
-        
-        let rows_dem = dem.configs.rows as isize;
-        let columns_dem = dem.configs.columns as isize;
 
-        // Construct intermediary rasters
-        let mut cost: Array2D<u8> = Array2D::new(rows_dem, columns_dem, 0, 0)?;
-        let mut solved: Array2D<u8> = Array2D::new(rows_dem, columns_dem, 0, 0)?;
-        let mut accum: Array2D<f64> = Array2D::new(rows_dem, columns_dem, i32::max_value() as f64, -1f64)?;
-        let mut backlink: Array2D<u8> = Array2D::new(rows_dem, columns_dem, 255, 255)?;
-        
-        
         // Get the attribute data
         let mut attribute_data = vec![0u64; streams.num_records];
         for record_num in 0..streams.num_records {
@@ -324,8 +306,8 @@ impl WhiteboxTool for BurnStreams {
 
 
         // Sort stream vectors based on the priority field
-        // My way of doing it is really ugly!
-        // https://stackoverflow.com/questions/40091161/sorting-a-vector-of-tuples-needs-a-reference-for-the-second-value
+        // My way of doing it is really ugly but it works
+        // There is certainly a more elegent way of doing this
         let idx: Vec<usize> = (0..streams.num_records).collect();
         let attribute_data_iter = attribute_data.into_iter();
         let mut tuple_attribute_data: Vec<(usize, u64)> = idx.into_iter().zip(attribute_data_iter).collect();
@@ -336,51 +318,60 @@ impl WhiteboxTool for BurnStreams {
             record_num_sorted[record_num] = tuple_attribute_data[record_num].0;
         }
 
-
-        let raster_bb = BoundingBox::new(
-            dem.configs.west,
-            dem.configs.east,
-            dem.configs.south,
-            dem.configs.north,
-        );
-        let mut bb = BoundingBox {
-            ..Default::default()
+        
+        if verbose {
+            println!("Reading DEM data...")
         };
-        let (mut top_row, mut bottom_row, mut left_col, mut right_col): (
-            isize,
-            isize,
-            isize,
-            isize,
-        );
+        // Load reference raster
+        let mut dem = Raster::new(&dem_file, "r")?;
+
+        let rows_dem = dem.configs.rows as isize;
+        let columns_dem = dem.configs.columns as isize;
+
+        // Set intermediary arrays and initialize some values
+        if verbose {
+            println!("Creating intermediary arrays...")
+        };
+        let mut cost: Array2D<u8> = Array2D::new(rows_dem, columns_dem, 0, 0)?;
+        let mut solved: Array2D<u8> = Array2D::new(rows_dem, columns_dem, 0, 0)?;
+        let mut accum: Array2D<f64> = Array2D::new(rows_dem, columns_dem, i32::max_value() as f64, -1f64)?;
+        let mut backlink: Array2D<u8> = Array2D::new(rows_dem, columns_dem, 255, 255)?;
+
+        let mut bb = BoundingBox {..Default::default()};
+        let (mut top_row, mut bottom_row, mut left_col, mut right_col): (isize, isize, isize, isize);
         let mut row_y_coord: f64;
         let mut col_x_coord: f64;
         let (mut x1, mut x2, mut y1, mut y2): (f64, f64, f64, f64);
         let (mut x_prime, mut y_prime): (f64, f64);
-        let mut start_point_in_part: usize;
-        let mut end_point_in_part: usize;
+        let start_point = 0 as usize;
+        let mut end_point: usize;
         let mut output_something = false;
         let num_records = streams.num_records;
 
 
+        // Set the small increment value to use
+        let small_num = if !flat_increment.is_nan() || flat_increment == 0f64 {
+            flat_increment
+        } else {
+            dem.configs.data_type = DataType::F64; // Don't take any chances and promote to 64-bit
+            let elev_digits = (dem.configs.maximum as i64).to_string().len();
+            let elev_multiplier = 10.0_f64.powi((6 - elev_digits) as i32);
+            let resx = dem.configs.resolution_x;
+            let resy = dem.configs.resolution_y;
+            let diagres = (resx * resx + resy * resy).sqrt();
+            1.0_f64 / elev_multiplier as f64 * diagres.ceil()
+        };
+
+
+
+        // Loop over all stream lines
+        // Could be parallelized by chunk of lines of the same priority (or lack of priority
+        // if --order_by is not set) but it may not increase speed by much but might worth a try
         for record_num in record_num_sorted {
             let record = streams.get_record(record_num);
 
-
-            // Ensure that all streams are entirely contained within the raster extent
-            // I could use the extent in the Shapefile header but the values seem to only be updated
-            // when a feature is added or removed (at least with editing with QGIS)
-            let rec_bb = BoundingBox::new(record.x_min, record.x_max, record.y_min, record.y_max);
-            if !rec_bb.within(raster_bb)
-            {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "The input vector data must be contained inside the raster extent. Some lines are currently extending beyond.",
-                ));
-            }
-
-
-            // Ensure that only singlepart polylines are used. This case should be catch right at loading
-            // but Whitebox doesn't distinguish currently singlepart from multipart
+            // Ensure that only singlepart polylines are used. This case should be catched right at loading
+            // but WhiteboxTools doesn't seem to currently distinguish singlepart from multipart
             // (see lines 500 and up in whitebox-vector\src\shapefile\geometry.rs)
             if record.num_parts as usize > 1
             {
@@ -390,12 +381,14 @@ impl WhiteboxTool for BurnStreams {
                 ));
             }
 
-            
-            start_point_in_part = 0 as usize;
-            end_point_in_part = record.num_points as usize - 1;
+
+
+            // STREAM RASTERIZATION  (see vector_lines_to_raster.rs for reference)
+
+            end_point = record.num_points as usize - 1;
 
             bb.initialize_to_inf();
-            for i in start_point_in_part..end_point_in_part + 1 {
+            for i in start_point..end_point + 1 {
                 if record.points[i].x < bb.min_x {
                     bb.min_x = record.points[i].x;
                 }
@@ -441,18 +434,12 @@ impl WhiteboxTool for BurnStreams {
             }
 
 
-            //let rows = bottom_row - top_row + 1;
-            //let columns = right_col - left_col + 1;
-
-            
-            
-
-            // find each intersection with a row.
+            // Find each intersection with a row
             for row in top_row..bottom_row + 1 {
                 row_y_coord = dem.get_y_from_row(row);
                 // find the x-coordinates of each of the line segments
                 // that intersect this row's y coordinate
-                for i in start_point_in_part..end_point_in_part {
+                for i in start_point..end_point {
                     if is_between(row_y_coord, record.points[i].y, record.points[i + 1].y) {
                         y1 = record.points[i].y;
                         y2 = record.points[i + 1].y;
@@ -464,7 +451,7 @@ impl WhiteboxTool for BurnStreams {
                             x_prime = x1 + (row_y_coord - y1) / (y2 - y1) * (x2 - x1);
                             let col = dem.get_column_from_x(x_prime);
 
-                            cost.set_value(row, col, 1u8);
+                            cost.set_value(row, col, 1);
                             output_something = true;
                         }
 
@@ -472,10 +459,12 @@ impl WhiteboxTool for BurnStreams {
                 }
             }
 
-            // find each intersection with a column.
+            // Find each intersection with a column
             for col in left_col..right_col + 1 {
                 col_x_coord = dem.get_x_from_column(col);
-                for i in start_point_in_part..end_point_in_part {
+                // find the y-coordinates of each of the line segments
+                // that intersect this column's x coordinate
+                for i in start_point..end_point {
                     if is_between(col_x_coord, record.points[i].x, record.points[i + 1].x) {
                         x1 = record.points[i].x;
                         x2 = record.points[i + 1].x;
@@ -487,7 +476,7 @@ impl WhiteboxTool for BurnStreams {
                             y_prime = y1 + (col_x_coord - x1) / (x2 - x1) * (y2 - y1);
                             let row = dem.get_row_from_y(y_prime);
 
-                            cost.set_value(row, col, 1u8);
+                            cost.set_value(row, col, 1);
                             output_something = true;
                         }
                     }
@@ -495,48 +484,27 @@ impl WhiteboxTool for BurnStreams {
             }
 
             // Find the row/col intersection point of both ends of the stream
-            let row_start = dem.get_row_from_y(record.points[start_point_in_part].y);
-            let col_start = dem.get_column_from_x(record.points[start_point_in_part].x);
-            let row_end = dem.get_row_from_y(record.points[end_point_in_part].y);
-            let col_end = dem.get_column_from_x(record.points[end_point_in_part].x);
+            let row_start = dem.get_row_from_y(record.points[start_point].y);
+            let col_start = dem.get_column_from_x(record.points[start_point].x);
+            let row_end = dem.get_row_from_y(record.points[end_point].y);
+            let col_end = dem.get_column_from_x(record.points[end_point].x);
 
 
 
-            // COST DISTANCE ANALYSIS  (see cost_distance.rs for reference)
-
-            /* --- AJOUTS ENCORE À FAIRE
-            1 - Gérer le cas où le point de départ se trouve à être dans la même cellule
-                que le point d'arrivée
-            2 - Réinitialiser les valeurs des raster intermédiaires uniquement à l'intérieur
-                de la bbox du vecteur traité
-            3 - Ajuster le BinaryHeap en fonction de la bbox du vecteur traité
-            4 - Bloquer le traitement d'un vecteur dont la rasterisation empiète
-                sur du NoData du MNT.
-            5 - Dans ma boucle avec d8pointer, trouver une façon de modifier les valeurs dans
-                le backlink pour éviter d'avoir gérer le fait que le log2 de 0 donne Inf
-            6 - Pour la définition de small_num, appliquer ma suggestion faite à
-                https://github.com/jblindsay/whitebox-tools/pull/185
-            7 - Ajuster les rapports de progressions aux endroits pertinents
-            8 - Regarder si je peux détecter dès le début si un Shapefile est
-                LINESTRING ou MULTILINESTRING
-            9 - Ajouter des infos dans la description sur le fonctionnement de l'outil
-                et continuer à ajouter (et retirer) des commentaires dans le code.
-
-            */
+            // COST DISTANCE ANALYSIS TO FIND LEAST COST PATH  (see cost_distance.rs for reference)
 
             // Make sure that both ends of the stream are included in the cost raster
-            // This is important if two independent streams are connected as the continuity
-            // is enforced.
+            // This is important if two independent streams are connected as the continuity is enforced.
             cost.set_value(row_start, col_start, 1); 
             cost.set_value(row_end, col_end, 1);
 
-            // Set to zero the end of the stream for the cost accumulation raster
+            // Set to zero the end of the stream for both the cost accumulation raster
             // and the backlink raster (D8 pointer)
             accum.set_value(row_end, col_end, 0.0);  
             backlink.set_value(row_end, col_end, 0);
 
             // Cost distance analysis
-            let num_cells = (rows_dem * columns_dem) as usize;
+            let num_cells = ((bottom_row - top_row + 1) * (right_col - left_col + 1)) as usize;
             let mut minheap = BinaryHeap::with_capacity(num_cells);
             minheap.push(GridCell {
                 row: row_end,
@@ -553,6 +521,7 @@ impl WhiteboxTool for BurnStreams {
             let cell_size_y = dem.configs.resolution_y;
             let diag_cell_size = (cell_size_x * cell_size_x + cell_size_y * cell_size_y).sqrt();
             let dist = [
+                0f64,
                 diag_cell_size,
                 cell_size_x,
                 diag_cell_size,
@@ -562,18 +531,24 @@ impl WhiteboxTool for BurnStreams {
                 diag_cell_size,
                 cell_size_y,
             ];
-            let dx = [1, 1, 1, 0, -1, -1, -1, 0];
-            let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
-            let backlink_dir = [16, 32, 64, 128, 1, 2, 4, 8];
+            let dx = [0,  1, 1, 1, 0, -1, -1, -1,  0];
+            let dy = [0, -1, 0, 1, 1,  1,  0, -1, -1];
+            let backlink_dir = [0, 5, 6, 7, 8, 1, 2, 3, 4];
             while !minheap.is_empty() {
                 let cell = minheap.pop().expect("Error during pop operation.");
                 row = cell.row;
                 col = cell.column;
                 if solved.get_value(row, col) == 0 {
+                    if dem.get_value(row, col) == dem.configs.nodata {
+                        return Err(Error::new(
+                            ErrorKind::InvalidInput,
+                            "The input vector data must not overlap NoData cells from DEM or extend beyond its extent.",
+                        ));
+                    }
                     solved.set_value(row, col, 1);
                     accum_val = accum.get_value(row, col);
                     cost1 = cost.get_value(row, col).into();
-                    for n in 0..8 {
+                    for n in 1..9 {
                         col_n = col + dx[n];
                         row_n = row + dy[n];
                         if cost.get_value(row_n, col_n) != cost.nodata {
@@ -594,93 +569,24 @@ impl WhiteboxTool for BurnStreams {
                     }
                 }
             }
-
-            /*
-            let accum_file = format!("{}{}", working_directory, "accum_file.flt");
-            let mut accum2 = Raster::initialize_using_file(&accum_file, &dem);
-            for row in 0..rows_dem {
-                for col in 0..columns_dem {
-                    let data = accum.get_value(row, col);
-                    accum2.set_value(row, col, data.into());
-                }
-            }
-
-            let _ = match accum2.write() {
-                Ok(_) => {
-                    if verbose {
-                        println!("Output accum_file file written")
-                    }
-                }
-                Err(e) => return Err(e),
-            };
-
-
-            let backlink_file = format!("{}{}", working_directory, "backlink_file.flt");
-            let mut backlink2 = Raster::initialize_using_file(&backlink_file, &dem);
-            for row in 0..rows_dem {
-                for col in 0..columns_dem {
-                    let data = backlink.get_value(row, col);
-                    backlink2.set_value(row, col, data.into());
-                }
-            }
-
-
-            let _ = match backlink2.write() {
-                Ok(_) => {
-                    if verbose {
-                        println!("Output backlink file written")
-                    }
-                }
-                Err(e) => return Err(e),
-            };
-            
-            
-            if true
-            {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "OUT!!!!!",
-                ));
-            }
-            
-            */
             
 
-            // UTILISATION DU BACKLINK POUR FAIRE DÉCROITRE LES VALEURS D'ÉLÉVATION
-            // REPREND DES SECTIONS DE breach_depressions.rs
-            // part du début du segment et remonte le backlink jusqu'à une direction de flux de 0
-            let small_num = if !flat_increment.is_nan() || flat_increment == 0f64 {
-                flat_increment
-            } else {
-                let elev_digits = (dem.configs.maximum as i64).to_string().len();
-                let elev_multiplier = 10.0_f64.powi((6 - elev_digits) as i32);
-                let resx = dem.configs.resolution_x;
-                let resy = dem.configs.resolution_y;
-                let diagres = (resx * resx + resy * resy).sqrt();
-                1.0_f64 / elev_multiplier as f64 * diagres.ceil()
-            };
 
+            // DECREASE ELEVATION ALONG BACKLINK (LEAST COST PATH)  (see breach_depressions.rs for reference)
 
-            let dx = [1, 1, 1, 0, -1, -1, -1, 0];
-            let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
-
-            let mut d8pointer = 1u8;
-            let mut zin: f64;
             let mut z_target: f64;
             let mut zin_n: f64;
             let (mut row_n, mut col_n): (isize, isize);
-            let mut dir: f64;
-
+            let mut dir = 1u8;
             row = row_start;
             col = col_start;
 
-            while d8pointer != 0 {
-                zin = dem.get_value(row, col);
-                z_target = zin;
+            while dir != 0 {
+                z_target = dem.get_value(row, col);
                 
                 // Compare elevation of each neighbour to the central cell
                 // and lower it to the bare minimum to clear the lower cells
-                for n in 0..8 {
+                for n in 1..9 {
                     row_n = row + dy[n];
                     col_n = col + dx[n];
                     zin_n = dem.get_value(row_n, col_n);
@@ -692,13 +598,10 @@ impl WhiteboxTool for BurnStreams {
                 }
                 dem.set_value(row, col, z_target);
 
-                // Get the next cell to compare
-                d8pointer = backlink.get_value(row, col);
-                if d8pointer != 0 {
-                    dir = (d8pointer as f64).log2();
-                    row += dy[dir as usize];
-                    col += dx[dir as usize];
-                }
+                // Get the next cell in line
+                dir = backlink.get_value(row, col);
+                row += dy[dir as usize];
+                col += dx[dir as usize];
             }
 
             if verbose {
@@ -706,7 +609,7 @@ impl WhiteboxTool for BurnStreams {
                 progress = (100.0_f64 * iter_progess as f64 / num_records as f64) as usize;
                 if progress != old_progress {
                     println!(
-                        "Burning Stream {} of {}: {}%",
+                        "Burning stream {} of {}: {}%",
                         iter_progess,
                         num_records,
                         progress
@@ -715,45 +618,32 @@ impl WhiteboxTool for BurnStreams {
                 }
             }
 
-            // Remise à zéro des array temporaires
-            for row in 0..rows_dem {
-                for col in 0..columns_dem {
+            // Reset intermediary arrays only in the bbox touched by
+            // the current stream to save time
+            for row in top_row..bottom_row {
+                for col in left_col..right_col {
                     cost.set_value(row, col, cost.nodata);
                     solved.set_value(row, col, solved.nodata);
                     accum.set_value(row, col, i32::max_value() as f64);
-                    backlink.set_value(row, col, backlink.nodata);
+                    //backlink.set_value(row, col, backlink.nodata);
                 }
             }
-            /*
-            for row in top_row..bottom_row + 1 {
-                for col in left_col..right_col + 1 {
-                    cost.set_value(row, col, cost.nodata);
-                    solved.set_value(row, col, solved.nodata);
-                    accum.set_value(row, col, i32::max_value() as f64);
-                    backlink.set_value(row, col, backlink.nodata);
-                }
-            }
-            */
         }
 
         
-        // Réinscrit les valeurs du fichier de dem
-        // Il y a probablement une manière plus intelligente de faire ça
-        let mut output = Raster::initialize_using_file(&output_file, &dem);
-        for row in 0..rows_dem {
-            let data = dem.get_row_data(row);
-            output.set_row_data(row, data);
-        }
+        // Redirect DEM raster to the output file
+        dem.file_name = output_file;
+        dem.file_mode = "w".to_string();
 
         let elapsed_time = get_formatted_elapsed_time(start);
-        output.add_metadata_entry(format!(
+        dem.add_metadata_entry(format!(
             "Created by whitebox_tools\' {} tool",
             self.get_tool_name()
         ));
-        output.add_metadata_entry(format!("Elapsed Time (excluding I/O): {}", elapsed_time));
+        dem.add_metadata_entry(format!("Elapsed Time (excluding I/O): {}", elapsed_time));
 
 
-        let _ = match output.write() {
+        let _ = match dem.write() {
             Ok(_) => {
                 if verbose {
                     println!("Output file written")
@@ -778,7 +668,8 @@ impl WhiteboxTool for BurnStreams {
     }
 }
 
-/// FONCTIONS POUR SECTION vector_lines_to_raster.rs
+
+/// FUNCTION FROM vector_lines_to_raster.rs
 fn is_between(val: f64, threshold1: f64, threshold2: f64) -> bool {
     if val == threshold1 || val == threshold2 {
         return true;
@@ -790,7 +681,7 @@ fn is_between(val: f64, threshold1: f64, threshold2: f64) -> bool {
 }
 
 
-/// FONCTIONS POUR SECTION cost_distance.rs
+/// FUNCTIONS FROM cost_distance.rs
 #[derive(PartialEq, Debug)]
 struct GridCell {
     row: isize,
