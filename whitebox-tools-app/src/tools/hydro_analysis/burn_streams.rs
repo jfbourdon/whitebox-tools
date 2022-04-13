@@ -2,7 +2,7 @@
 This tool is part of the WhiteboxTools geospatial analysis library.
 Authors: Jean-François Bourdon
 Created: 04/04/2022
-Last Modified: 08/04/2022
+Last Modified: 13/04/2022
 License: MIT
 */
 
@@ -31,7 +31,7 @@ use std::path;
 /// type as the input assuming the user chose its value wisely.
 ///
 /// Some restrictions to the stream vectors geometry are in place in order to prevent any guessing work. Streams must all
-/// be single part and only cover valid cells (no NoData) from the DEM.
+/// be singlepart and not overlap or touch any NoData cells from the DEM.
 ///
 /// # See Also
 /// `BurnStreamsAtRoads`, `RasterStreamsToVector`, `RasterizeStreams`
@@ -369,6 +369,7 @@ impl WhiteboxTool for BurnStreams {
         // if --order_by is not set) but it may not increase speed by much but might worth a try
         for record_num in record_num_sorted {
             let record = streams.get_record(record_num);
+            let record_fid = record_num + 1;
 
             // Ensure that only singlepart polylines are used. This case should be catched right at loading
             // but WhiteboxTools doesn't seem to currently distinguish singlepart from multipart
@@ -542,7 +543,7 @@ impl WhiteboxTool for BurnStreams {
                     if dem.get_value(row, col) == dem.configs.nodata {
                         return Err(Error::new(
                             ErrorKind::InvalidInput,
-                            "The input vector data must not overlap NoData cells from DEM or extend beyond its extent.",
+                            format!("The input vector data must not extend beyond the DEM extent or overlap/touch any of its NoData cells. See FID {}.", record_fid),
                         ));
                     }
                     solved.set_value(row, col, 1);
@@ -669,7 +670,7 @@ impl WhiteboxTool for BurnStreams {
 }
 
 
-/// FUNCTION FROM vector_lines_to_raster.rs
+
 fn is_between(val: f64, threshold1: f64, threshold2: f64) -> bool {
     if val == threshold1 || val == threshold2 {
         return true;
@@ -680,8 +681,6 @@ fn is_between(val: f64, threshold1: f64, threshold2: f64) -> bool {
     val > threshold2 && val < threshold1
 }
 
-
-/// FUNCTIONS FROM cost_distance.rs
 #[derive(PartialEq, Debug)]
 struct GridCell {
     row: isize,
