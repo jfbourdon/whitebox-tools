@@ -620,8 +620,8 @@ impl WhiteboxTool for BurnStreams {
 
             // Reset intermediary arrays only in the bbox touched by
             // the current stream to save time
-            for row in top_row..bottom_row {
-                for col in left_col..right_col {
+            for row in top_row..bottom_row + 1 {
+                for col in left_col..right_col + 1 {
                     cost.set_value(row, col, cost.nodata);
                     solved.set_value(row, col, solved.nodata);
                     accum.set_value(row, col, i32::max_value() as f64);
