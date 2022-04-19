@@ -217,6 +217,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 
 [[package]]
+name = "fasteval"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f4cdac9e4065d7c48e30770f8665b8cef9a3a73a63a4056a33a5f395bc7cf75"
+
+[[package]]
 name = "flate2"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -920,6 +926,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsp-rs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02f971d0e820c6e73d2c71cf139e2cbe6962bdacb456efc4a78c2a41b4244426"
+dependencies = [
+ "rand 0.6.5",
+]
+
+[[package]]
 name = "typenum"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -957,10 +972,11 @@ checksum = "1a143597ca7c7793eff794def352d41792a93c481eb1042423ff7ff72ba2c31f"
 
 [[package]]
 name = "whitebox_common"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "byteorder",
  "nalgebra",
+ "num-traits",
  "rand 0.7.3",
  "rstar",
  "rustc_version",
@@ -970,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "whitebox_lidar"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "brotli",
  "byteorder",
@@ -984,29 +1000,35 @@ dependencies = [
 
 [[package]]
 name = "whitebox_plugins"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
+ "fasteval",
+ "nalgebra",
  "num_cpus",
+ "rand 0.7.3",
+ "tsp-rs",
  "whitebox_common",
+ "whitebox_lidar",
  "whitebox_raster",
  "whitebox_vector",
 ]
 
 [[package]]
 name = "whitebox_raster"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "byteorder",
  "chrono",
  "lzw",
  "miniz_oxide 0.3.7",
+ "num-traits",
  "num_cpus",
  "whitebox_common",
 ]
 
 [[package]]
 name = "whitebox_tools"
-version = "1.5.0"
+version = "2.1.0"
 dependencies = [
  "byteorder",
  "chrono",

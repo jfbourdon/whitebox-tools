@@ -113,6 +113,7 @@ impl ToolManager {
         tool_names.push("MinimumBoundingCircle".to_string());
         tool_names.push("MinimumBoundingEnvelope".to_string());
         tool_names.push("MinimumConvexHull".to_string());
+        tool_names.push("MultiplyOverlay".to_string());
         tool_names.push("NarrownessIndex".to_string());
         tool_names.push("NaturalNeighbourInterpolation".to_string());
         tool_names.push("NearestNeighbourGridding".to_string());
@@ -444,7 +445,6 @@ impl ToolManager {
         tool_names.push("DiffFromMeanElev".to_string());
         tool_names.push("DirectionalRelief".to_string());
         tool_names.push("DownslopeIndex".to_string());
-        // tool_names.push("DrainagePreservingSmoothing".to_string());
         tool_names.push("EdgeDensity".to_string());
         tool_names.push("ElevAbovePit".to_string());
         tool_names.push("ElevPercentile".to_string());
@@ -455,7 +455,8 @@ impl ToolManager {
         tool_names.push("FetchAnalysis".to_string());
         tool_names.push("FillMissingData".to_string());
         tool_names.push("FindRidges".to_string());
-        // tool_names.push("Geomorphons".to_string());
+        tool_names.push("GaussianCurvature".to_string());
+        tool_names.push("Geomorphons".to_string());
         tool_names.push("Hillshade".to_string());
         tool_names.push("HorizonAngle".to_string());
         tool_names.push("HypsometricAnalysis".to_string());
@@ -468,7 +469,11 @@ impl ToolManager {
         tool_names.push("MaxDownslopeElevChange".to_string());
         tool_names.push("MaxElevDevSignature".to_string());
         tool_names.push("MaxElevationDeviation".to_string());
+        tool_names.push("MaxUpslopeElevChange".to_string());
+        tool_names.push("MaximalCurvature".to_string());
+        tool_names.push("MeanCurvature".to_string());
         tool_names.push("MinDownslopeElevChange".to_string());
+        tool_names.push("MinimalCurvature".to_string());
         tool_names.push("MultidirectionalHillshade".to_string());
         tool_names.push("MultiscaleElevationPercentile".to_string());
         tool_names.push("MultiscaleRoughness".to_string());
@@ -617,6 +622,7 @@ impl ToolManager {
             }
             "minimumconvexhull" => Some(Box::new(gis_analysis::MinimumConvexHull::new())),
             "minoverlay" => Some(Box::new(gis_analysis::MinOverlay::new())),
+            "multiplyoverlay" => Some(Box::new(gis_analysis::MultiplyOverlay::new())),
             "naturalneighbourinterpolation" => {
                 Some(Box::new(gis_analysis::NaturalNeighbourInterpolation::new()))
             }
@@ -1081,9 +1087,6 @@ impl ToolManager {
             "difffrommeanelev" => Some(Box::new(terrain_analysis::DiffFromMeanElev::new())),
             "directionalrelief" => Some(Box::new(terrain_analysis::DirectionalRelief::new())),
             "downslopeindex" => Some(Box::new(terrain_analysis::DownslopeIndex::new())),
-            // "drainagepreservingsmoothing" => Some(Box::new(
-            //     terrain_analysis::DrainagePreservingSmoothing::new(),
-            // )),
             "edgedensity" => Some(Box::new(terrain_analysis::EdgeDensity::new())),
             "elevabovepit" => Some(Box::new(terrain_analysis::ElevAbovePit::new())),
             "elevpercentile" => Some(Box::new(terrain_analysis::ElevPercentile::new())),
@@ -1098,7 +1101,8 @@ impl ToolManager {
             "fetchanalysis" => Some(Box::new(terrain_analysis::FetchAnalysis::new())),
             "fillmissingdata" => Some(Box::new(terrain_analysis::FillMissingData::new())),
             "findridges" => Some(Box::new(terrain_analysis::FindRidges::new())),
-            // "geomorphons" => Some(Box::new(terrain_analysis::Geomorphons::new())),
+            "gaussiancurvature" => Some(Box::new(terrain_analysis::GaussianCurvature::new())),
+            "geomorphons" => Some(Box::new(terrain_analysis::Geomorphons::new())),
             "hillshade" => Some(Box::new(terrain_analysis::Hillshade::new())),
             "horizonangle" => Some(Box::new(terrain_analysis::HorizonAngle::new())),
             "hypsometricanalysis" => Some(Box::new(terrain_analysis::HypsometricAnalysis::new())),
@@ -1121,9 +1125,13 @@ impl ToolManager {
                 Some(Box::new(terrain_analysis::MaxElevationDeviation::new()))
             }
             "maxelevdevsignature" => Some(Box::new(terrain_analysis::MaxElevDevSignature::new())),
+            "maxupslopeelevchange" => Some(Box::new(terrain_analysis::MaxUpslopeElevChange::new())),
+            "maximalcurvature" => Some(Box::new(terrain_analysis::MaximalCurvature::new())),
+            "meancurvature" => Some(Box::new(terrain_analysis::MeanCurvature::new())),
             "mindownslopeelevchange" => {
                 Some(Box::new(terrain_analysis::MinDownslopeElevChange::new()))
             }
+            "minimalcurvature" => Some(Box::new(terrain_analysis::MinimalCurvature::new())),
             "multidirectionalhillshade" => {
                 Some(Box::new(terrain_analysis::MultidirectionalHillshade::new()))
             }
@@ -1264,10 +1272,79 @@ impl ToolManager {
                         println!("Failure to run plugin subprocess.");
                     }
                 } else {
-                    return Err(Error::new(
-                        ErrorKind::NotFound,
-                        format!("Unrecognized tool name {}.", tool_name),
-                    ))
+                    // We couldn't find an executable file for the tool, but still check to see if it's 
+                    // one of the extension plugins. If it is, issue a 'need valid license' warning. If 
+                    // not, then issue an unrecognized tool error.
+                    let plugin_names = vec![
+                        "accumulationcurvature",
+                        "assessroute",
+                        "cannyedgedetection", 
+                        "curvedness",
+                        "dbscan",
+                        "differencecurvature",
+                        "evaluatetrainingsites", 
+                        "filterlidar",
+                        "fix_danglingarcs",
+                        "generalizeclassifiedraster",
+                        "generalizewithsimilarity",
+                        "generatingfunction",
+                        "horizontalexcesscurvature",
+                        "hydrologicconnectivity",
+                        "imagesegmentation",
+                        "imageslider",
+                        "inversepca", 
+                        "knn_classification",
+                        "knn_regression",
+                        "lastolaz",
+                        "laztolas",
+                        "lidarcontour",
+                        "lidarpointreturnanalysis",
+                        "lidarsibsoninterpolation", 
+                        "lidarsortbytime", 
+                        "localhypsometricanalysis",
+                        "logistic_regression",
+                        "lowpointsonheadwaterdivides",
+                        "mindistclassification",
+                        "modifylidar",
+                        "openness",
+                        "parallelepipedclassification",
+                        "phicoefficient",
+                        "random_forest_classification",
+                        "random_forest_regression",
+                        "reconcilemultipleheaders",
+                        "recoverflightlineinfo",
+                        "recreatepasslines",
+                        "registerlicense",
+                        "removefieldedgepoints",
+                        "repairstreamvectortopology",
+                        "ringcurvature",
+                        "rotor",
+                        "shadowanimation",
+                        "shadowimage",
+                        "slopevsaspectplot",
+                        "smoothvegetationresidual",
+                        "splitlidar",
+                        "svm_classification",
+                        "svm_regression",
+                        "topographicpositionanimation",
+                        "unsphericity",
+                        "vectorstreamnetworkanalysis",
+                        "verticalexcesscurvature",
+                        "yieldfilter",
+                        "yieldmap",
+                        "yieldnormalization"
+                    ];
+                    if plugin_names.contains(&tool_name.to_lowercase().as_ref()) {
+                        return Err(Error::new(
+                            ErrorKind::NotFound,
+                            format!("Invalid license: \nThis tool is part of a Whitebox extension product \nand there is a missing license. Please contact \nWhitebox Geospatial Inc. (support@whiteboxgeo.com) to obtain \na valid license key."),
+                        ))
+                    } else {
+                        return Err(Error::new(
+                            ErrorKind::NotFound,
+                            format!("Unrecognized tool name {}.", tool_name),
+                        ))
+                    }
                 }
                 return Ok(())
             }

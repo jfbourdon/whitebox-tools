@@ -35,7 +35,7 @@ use whitebox_raster::*;
 /// > *p* = (*A* / *threshold* + 1)<sup>*h*</sup>
 ///
 /// Where *L<sub>i</sub>* is the contour length, and is 0.5&times;cell size for cardinal directions and 0.354&times;cell size for
-/// diagonal directions, *n* = 8, and represents each of the eight neighbouring grid cells, and, *A* is the flow accumultation value assigned to the current grid cell, that is being 
+/// diagonal directions, *n* = 8, and represents each of the eight neighbouring grid cells, and, *A* is the flow accumulation value assigned to the current grid cell, that is being 
 /// apportioned downslope. The non-dispersive, channel initiation *threshold* (`--threshold`) is a flow-accumulation 
 /// value (measured in upslope grid cells, which is directly proportional to area) above which flow dispersion is 
 /// no longer permitted. Grid cells with flow-accumulation values above this threshold will have their flow routed 
@@ -48,7 +48,7 @@ use whitebox_raster::*;
 /// can be: 1) `cells` (i.e. the number of inflowing grid cells), `catchment area` (i.e. the upslope area),
 /// or `specific contributing area` (i.e. the catchment area divided by the flow width). The default value
 /// is `specific contributing area`. The user must also specify whether the output flow-accumulation grid should be
-/// log-tranformed (`--log`), i.e. the output, if this option is selected, will be the natural-logarithm of the
+/// log-transformed (`--log`), i.e. the output, if this option is selected, will be the natural-logarithm of the
 /// accumulated flow value. This is a transformation that is often performed to better visualize the
 /// contributing area distribution. Because contributing areas tend to be very high along valley bottoms
 /// and relatively low on hillslopes, when a flow-accumulation image is displayed, the distribution of
@@ -109,7 +109,7 @@ fn help() {
     --output       Name of the output raster file.
     --out_type     Output type; one of 'cells', 'specific contributing area' (default), and 'catchment area'.
     --exponent     Optional exponent parameter; default is 1.0.
-    --threshold    Optional convergence threshold parameter, in grid cells; default is inifinity.
+    --threshold    Optional convergence threshold parameter, in grid cells; default is infinity.
     --log          Log-transform the output values?
     --clip         Optional flag to request clipping the display max by 1%.
     

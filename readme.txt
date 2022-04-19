@@ -55,6 +55,36 @@ for more details.
 ******************
 * Release Notes: *
 ******************
+Version 2.X.X (XX-XX-20XX)
+- Added the TravellingSalesmanProblem tool for identifying short routes connecting multiple locations.
+- Added the MultiplyOverlay tool.
+- Added the MaxUpslopeValue tool.
+- Fixed a bug in the automatic install of the Whitebox extensions that affected Windows users.
+- Fixed a bug with the persistence of the compress_rasters parameter. Python users were unable to
+  turn off the compress flag previously.
+
+Version 2.1.0 (30-01-2022)
+- The Geomorphons tool for landform classification is now available.
+- Added the MeanCurvature, GaussianCurvature, MinimalCurvature and MaximalCurvature tools.
+- Added GaussianScaleSpace tool, which uses the fast Gaussian approximation algorithm to produce 
+  scaled land-surface parameter measurements from an input DEM.
+- Added LocalQuadraticRegression tool, which is an implementation of the constrained quadratic 
+  regression algorithm using a flexible window size described in Wood (1996).
+- Added the MaxUpslopeElevChange tool, the upslope equivalent of the MaxDownslopeElevChange tool.
+- Updated the Slope, Aspect, ProfileCurvature, TangentialCurvature, PlanCurvature, and
+  TotalCurvature tools to use the more robust 5x5 3rd order bivariate polynomial method
+  of Florinsky (2016) for rectangular grid DEMs, and the 3x3 method, also described by
+  Florinsky (2016), for DEMs in geographic coordinates. This is a large improvement in
+  accuracy for calculating these surface morphology parameters on geographic coordinates
+  compared with the 'z-conversion fudge factor' method used previously.
+- Added the LidarShift tool for applying a simple shift to point x,y,z coordinates.
+- Added the ability to automatically install the Whitebox extensions using the Python API.
+- Fixed a bug in the lower quartile valley mapping method of the ExtractValleys tool.
+- Fixed a bug in the PennockLandformClass tool.
+- Fixed a bug in the Shapefile reader that affected files of the PointZ ShapeType.
+- Fixed a bug with the CsvPointsToVector tool.
+- Reduced the peak memory usage of the D8Pointer and Rho8Pointer tools by about 37.5%.
+- Several other minor bugs have been fixed.
 
 Version 2.0.0 (30-08-2021)
 - The most important feature in this release is the addition of support for reading and writing the LAZ

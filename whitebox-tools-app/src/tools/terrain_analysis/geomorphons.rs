@@ -2,14 +2,14 @@
 This tool is part of the WhiteboxTools geospatial analysis library.
 Authors: Daniel Newman
 Created: 21/09/2018
-Last Modified: 18/10/2019
+Last Modified: 23/01/2022
 Last Modified By: John Lindsay
 License: MIT
 */
 
 // NOTE Why did original go through the effort of using map unit lengths while using cell center instead of proper radii?
 
-use whitebox_raster::Raster;
+use whitebox_raster::*;
 use crate::tools::*;
 use num_cpus;
 use std::env;
@@ -20,6 +20,48 @@ use std::sync::mpsc;
 use std::thread;
 use std::io::{Error, ErrorKind};
 
+
+/// This tool can be used to perform a geomorphons landform classification based on an input digital elevation 
+/// model (`--dem`). The geomorphons concept is based on line-of-sight analysis for the eight
+/// topographic profiles in the cardinal directions surrounding each grid cell in the input DEM. The relative
+/// sizes of the zenith angle of a profile's maximum elevation angle (i.e. horizon angle) and the nadir angle of
+/// a profile's minimum elevation angle are then used to generate a ternary (base-3) digit: 0 when the nadir 
+/// angle is less than the zenith angle, 1 when the two angles differ by less than a user-defined flatness 
+/// threshold (`--threshold`), and 2 when the nadir angle is greater than the zenith angle. A ternary number 
+/// is then derived from the digits assigned to each of the eight profiles, with digits sequenced counter-clockwise
+/// from east. This ternary number forms the  geomorphons code assigned to the grid cell. There are 
+/// 3<sup>8</sup> = 6561 possible codes, although many of these codes are equivalent geomorphons through
+/// rotations and reflections. Some of the remaining geomorphons also rarely if ever occur in natural
+/// topography. Jasiewicz et al. (2013) identified 10 common landform types by reclassifying related
+/// geomorphons codes. The user may choose to output these common forms (`--forms`) rather than the 
+/// the raw ternary code. These landforms include:
+/// 
+/// | Value | Landform Type |
+/// |-:|:-|
+/// | 1  | Flat |
+/// | 2  | Peak (summit) |
+/// | 3  | Ridge |
+/// | 4  | Shoulder |
+/// | 5  | Spur (convex) |
+/// | 6  | Slope |
+/// | 7  | Hollow (concave) |
+/// | 8  | Footslope |
+/// | 9  | Valley |
+/// | 10 | Pit (depression) |
+/// 
+/// One of the main advantages of the geomrophons method is that, being based on minimum/maximum elevation 
+/// angles, the scale used to estimate the landform type at a site adapts to the surrounding terrain.
+/// In principle, choosing a large value of search distance (`--search`) should result in 
+/// identification of a landform element regardless of its scale.
+/// 
+/// ![](../../doc_img/Geomorphons.jpg)
+/// 
+/// # Reference
+/// Jasiewicz, J., and Stepinski, T. F. (2013). Geomorphons — a pattern recognition approach to classification 
+/// and mapping of landforms. Geomorphology, 182, 147-156.
+/// 
+/// # See Also
+/// `PennockLandformClass`
 pub struct Geomorphons {
     name: String,
     description: String,
@@ -58,7 +100,7 @@ impl Geomorphons {
             flags: vec!["-s".to_owned(), "--search".to_owned()],
             description: "Look up distance.".to_owned(),
             parameter_type: ParameterType::Integer,
-            default_value: Some("3".to_owned()),
+            default_value: Some("50".to_owned()),
             optional: false
         });
 
@@ -85,7 +127,7 @@ impl Geomorphons {
             flags: vec!["-f".to_owned(), "--forms".to_owned()],
             description: "Classify geomorphons into 10 common land morphologies, else, output ternary code.".to_owned(),
             parameter_type: ParameterType::Boolean,
-            default_value: Some("false".to_owned()),
+            default_value: Some("true".to_owned()),
             optional: true
         });
 
@@ -98,7 +140,7 @@ impl Geomorphons {
         if e.contains(".exe") {
             short_exe += ".exe";
         }
-        let usage = format!(">>.*{} -r={} -v --wd=\"*path*to*data*\" --dem=DEM.tif -o=output.tif --slope=3.0 --prof=0.1 --plan=0.0", short_exe, name).replace("*", &sep);
+        let usage = format!(">>.*{} -r={} -v --wd=\"*path*to*data*\" --dem=DEM.tif -o=output.tif --search=50 --threshold=0.0 --tdist=0.0 --forms", short_exe, name).replace("*", &sep);
 
         Geomorphons {
             name: name,
@@ -479,7 +521,7 @@ impl WhiteboxTool for Geomorphons {
                                         code += (pattern[p] as usize) * power;
                                         power *= 3;
                                     }
-                                    // extract rotated and mirrod code from a ternary code
+                                    // extract rotated and mirrored code from a ternary code
                                     data[col as usize] = gtc[code] as f64;
                                 }
                             }
@@ -503,6 +545,8 @@ impl WhiteboxTool for Geomorphons {
         }
 
         let elapsed_time = get_formatted_elapsed_time(start);
+        output.configs.photometric_interp = PhotometricInterpretation::Categorical;
+        output.configs.data_type = DataType::I16;
         output.configs.palette = "qual.plt".to_string();
         output.add_metadata_entry(format!("Created by whitebox_tools\' {} tool", self.get_tool_name()));
         output.add_metadata_entry(format!("Input DEM file: {}", input_file));

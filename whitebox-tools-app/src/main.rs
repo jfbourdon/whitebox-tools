@@ -2,7 +2,7 @@
 This code is part of the WhiteboxTools geospatial analysis library.
 Authors: Dr. John Lindsay
 Created: 21/06/2017
-Last Modified: 10/02/2021
+Last Modified: 30/01/2022
 License: MIT
 */
 
@@ -254,10 +254,12 @@ fn run() -> Result<(), Error> {
                 license();
             }
             return Ok(());
-        } else if arg.starts_with("-compress_rasters") || arg.starts_with("--compress_rasters") {
+        } else if arg.starts_with("-compress_raster") || arg.starts_with("--compress_raster") {
             let mut v = arg
                 .replace("--compress_rasters", "")
                 .replace("-compress_rasters", "")
+                .replace("--compress_raster", "")
+                .replace("-compress_raster", "")
                 .replace("\"", "")
                 .replace("\'", "");
             if v.starts_with("=") {
@@ -427,7 +429,7 @@ Example Usage:
 
 fn license() {
     let license_text = "WhiteboxTools License
-Copyright 2017-2020 John Lindsay
+Copyright 2017-2021 John Lindsay
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 associated documentation files (the \"Software\"), to deal in the Software without restriction,
@@ -449,7 +451,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.";
 fn version() {
     const VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
     println!(
-        "WhiteboxTools v{} by Dr. John B. Lindsay (c) 2017-2021
+        "WhiteboxTools v{} by Dr. John B. Lindsay (c) 2017-2022
 
 WhiteboxTools is an advanced geospatial data analysis platform developed at
 the University of Guelph's Geomorphometry and Hydrogeomatics Research 

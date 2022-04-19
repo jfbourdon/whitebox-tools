@@ -51,7 +51,7 @@ use whitebox_raster::*;
 /// 
 /// The user-specified non-dispersive, channel initiation *threshold* (`--threshold`) is a flow-accumulation 
 /// value (measured in upslope grid cells, which is directly proportional to area) above which flow dispersion is 
-/// no longer permited. Grid cells with flow-accumulation values above this area threshold will have their flow
+/// no longer permitted. Grid cells with flow-accumulation values above this area threshold will have their flow
 /// routed in a manner that is similar to the D8 single-flow-direction algorithm, directing all flow towards the
 /// steepest downslope neighbour. This is usually done under the assumption that flow dispersion, whilst appropriate
 /// on hillslope areas, is not realistic once flow becomes channelized. Importantly, the `--threshold` parameter sets 
@@ -129,7 +129,7 @@ fn help() {
     --out_type     Output type; one of 'cells', 'specific contributing area' (default), and 'catchment area'.
     --exponent     Optional upper-bound exponent parameter; default is 10.0.
     --max_slope    Optional upper-bound slope parameter, in degrees (0-90); default is 45.0.
-    --threshold    Optional convergence threshold parameter, in grid cells; default is inifinity.
+    --threshold    Optional convergence threshold parameter, in grid cells; default is infinity.
     --log          Log-transform the output values?
     --clip         Optional flag to request clipping the display max by 1%.
     

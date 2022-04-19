@@ -22,7 +22,7 @@ use std::thread;
 /// (`--output`) raster name.
 ///
 /// # See Also
-/// `MinDownslopeElevChange`, `NumDownslopeNeighbours`
+/// `MaxUpslopeElevChange`, `MinDownslopeElevChange`, `NumDownslopeNeighbours`
 pub struct MaxDownslopeElevChange {
     name: String,
     description: String,

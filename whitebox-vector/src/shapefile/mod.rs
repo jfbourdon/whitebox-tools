@@ -29,11 +29,11 @@ use std::str;
 #[derive(Debug, Default, Clone)]
 pub struct ShapefileHeader {
     file_code: i32,            // BigEndian; value is 9994
-    unused1: i32,              // BigEndian
-    unused2: i32,              // BigEndian
-    unused3: i32,              // BigEndian
-    unused4: i32,              // BigEndian
-    unused5: i32,              // BigEndian
+    // unused1: i32,              // BigEndian
+    // unused2: i32,              // BigEndian
+    // unused3: i32,              // BigEndian
+    // unused4: i32,              // BigEndian
+    // unused5: i32,              // BigEndian
     pub file_length: i32,      // BigEndian
     pub version: i32,          // LittleEndian
     pub shape_type: ShapeType, // LittleEndian
@@ -258,7 +258,7 @@ impl Shapefile {
         self.header.version = bor.read_i32()?;
         let st = bor.read_i32()?;
         self.header.shape_type = ShapeType::from_int(st); //bor.read_i32());
-
+        
         // bounding box
         self.header.x_min = bor.read_f64()?;
         self.header.y_min = bor.read_f64()?;
@@ -352,7 +352,7 @@ impl Shapefile {
                 }
 
                 ShapeType::PointZ => {
-                    let sfg = if content_length != 36 {
+                    let sfg = if content_length == 36 {
                         // both z and m are included
                         ShapefileGeometry {
                             shape_type: ShapeType::PointZ,

@@ -1,8 +1,8 @@
 [package]
 name = "whitebox_plugins"
-version = "1.5.0"
+version = "2.0.0"
 authors = ["John Lindsay <jlindsay@uoguelph.ca>"]
-edition = "2018"
+edition = "2021"
 
 [[bin]]
 name = "conditional_evaluation"
@@ -15,6 +15,22 @@ path = "src/edge_contamination/main.rs"
 [[bin]]
 name = "exposure_towards_wind_flux"
 path = "src/exposure_towards_wind_flux/main.rs"
+
+[[bin]]
+name = "gaussian_scale_space"
+path = "src/gaussian_scale_space/main.rs"
+
+[[bin]]
+name = "lidar_shift"
+path = "src/lidar_shift/main.rs"
+
+[[bin]]
+name = "local_quadratic_regression"
+path = "src/local_quadratic_regression/main.rs"
+
+[[bin]]
+name = "max_upslope_value"
+path = "src/max_upslope_value/main.rs"
 
 [[bin]]
 name = "qin_flow_accumulation"
@@ -36,10 +52,17 @@ path = "src/rho8_flow_accumulation/main.rs"
 name = "split_vector_lines"
 path = "src/split_vector_lines/main.rs"
 
+[[bin]]
+name = "travelling_salesman_problem"
+path = "src/travelling_salesman_problem/main.rs"
+
 [dependencies]
 fasteval = "0.2.4"
+nalgebra = "0.18.0"
 num_cpus = "1.13.0"
 rand = { version = "0.7", features = ["small_rng"] }
+tsp-rs = "0.1.0"
 whitebox_common = { path = "../whitebox-common" }
+whitebox_lidar = { path = "../whitebox-lidar" }
 whitebox_raster = { path = "../whitebox-raster" }
 whitebox_vector = { path = "../whitebox-vector" }

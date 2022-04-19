@@ -20,7 +20,7 @@ use std::path;
 /// Each of the input rasters must have the same spatial extent and number of rows and columns.
 ///
 /// # See Also
-/// `WeightedSum`
+/// `WeightedSum`, `MultiplyOverlay`
 pub struct SumOverlay {
     name: String,
     description: String,
