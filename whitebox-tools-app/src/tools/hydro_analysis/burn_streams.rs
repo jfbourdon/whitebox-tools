@@ -633,8 +633,9 @@ impl WhiteboxTool for BurnStreams {
 
         
         // Redirect DEM raster to the output file
-        dem.file_name = output_file;
+        dem.file_name = output_file.to_owned();
         dem.file_mode = "w".to_string();
+        dem.raster_type = get_raster_type_from_file(output_file.to_owned(), "w".to_string());
 
         let elapsed_time = get_formatted_elapsed_time(start);
         dem.add_metadata_entry(format!(
@@ -685,7 +686,6 @@ fn is_between(val: f64, threshold1: f64, threshold2: f64) -> bool {
 struct GridCell {
     row: isize,
     column: isize,
-    // priority: usize,
     priority: f64,
 }
 

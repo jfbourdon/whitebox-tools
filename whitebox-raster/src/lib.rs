@@ -1352,7 +1352,8 @@ impl Default for RasterType {
     }
 }
 
-fn get_raster_type_from_file(file_name: String, file_mode: String) -> RasterType {
+
+pub fn get_raster_type_from_file(file_name: String, file_mode: String) -> RasterType {
     // get the file extension
     let extension: String = match Path::new(&file_name).extension().unwrap().to_str() {
         Some(n) => n.to_string().to_lowercase(),
