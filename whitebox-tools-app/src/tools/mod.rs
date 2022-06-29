@@ -1763,6 +1763,7 @@ enum ParameterFileType {
     Text,
     Html,
     Csv,
+    Dat,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
