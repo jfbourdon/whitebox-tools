@@ -510,7 +510,7 @@ impl WhiteboxTool for ClassifyOverlapPoints {
             }
         }
 
-        println!("Num. overlapping points flagged: {num_overlap}");
+        //println!("Num. overlapping points flagged: {num_overlap}");
 
         let mut output = LasFile::initialize_using_file(&output_file, &input);
         output.header.system_id = "EXTRACTION".to_string();
