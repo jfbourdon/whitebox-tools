@@ -159,7 +159,7 @@ impl ToolManager {
         tool_names.push("BreachDepressions".to_string());
         tool_names.push("BreachDepressionsLeastCost".to_string());
         tool_names.push("BreachSingleCellPits".to_string());
-        tool_names.push("BurnStreams".to_string());
+        tool_names.push("BurnPaths".to_string());
         tool_names.push("BurnStreamsAtRoads".to_string());
         tool_names.push("D8FlowAccumulation".to_string());
         tool_names.push("D8MassFlux".to_string());
@@ -682,7 +682,7 @@ impl ToolManager {
                 Some(Box::new(hydro_analysis::BreachDepressionsLeastCost::new()))
             }
             "breachsinglecellpits" => Some(Box::new(hydro_analysis::BreachSingleCellPits::new())),
-            "burnstreams" => Some(Box::new(hydro_analysis::BurnStreams::new())),
+            "burnstreams" => Some(Box::new(hydro_analysis::BurnPaths::new())),
             "burnstreamsatroads" => Some(Box::new(hydro_analysis::BurnStreamsAtRoads::new())),
             "d8flowaccumulation" => Some(Box::new(hydro_analysis::D8FlowAccumulation::new())),
             "d8massflux" => Some(Box::new(hydro_analysis::D8MassFlux::new())),

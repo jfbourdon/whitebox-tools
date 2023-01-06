@@ -2,7 +2,7 @@
 This tool is part of the WhiteboxTools geospatial analysis library.
 Authors: Jean-François Bourdon
 Created: 04/04/2022
-Last Modified: 13/04/2022
+Last Modified: 06/01/2023
 License: MIT
 */
 
@@ -19,9 +19,9 @@ use std::f64;
 use std::io::{Error, ErrorKind};
 use std::path;
 
-/// This tool decrements (lowers) the elevation of pixels within an input digital elevation model (DEM) (`--dem`)
-/// along an input vector stream network (`--streams`) following the numerisation direction of each stream vector
-/// (from upstream to downstream). Streams can be processed in a specific order by providing to the `--order_by`
+/// This tool decrements (lowers) the elevation of pixels within an digital elevation model (DEM) (`--dem`)
+/// along a vector path network (`--paths`) following the digitalization direction of each vector
+/// (from start to end). Paths can be processed in a specific order by providing to the `--order_by`
 /// parameter the name of a numeric (integer) field from the attributes table (ascending order).
 /// The optional flat height increment value (`--flat_increment`) can be specified to control
 /// the pixel lowering rate. Notice that if the `--flat_increment` parameter isn't specified,
@@ -30,12 +30,12 @@ use std::path;
 /// stored with 32-bit precision. However, if a flat increment value is specified, the output DEM will keep the same data
 /// type as the input assuming the user chose its value wisely.
 ///
-/// Some restrictions to the stream vectors geometry are in place in order to prevent any guessing work. Streams must all
-/// be singlepart and not overlap or touch any NoData cells from the DEM.
+/// Some restrictions to the vector geometry are in place in order to prevent any guessing work in the algorithm.
+/// All paths entities must be singlepart and not overlap or touch any NoData cells from the DEM.
 ///
 /// # See Also
 /// `BurnStreamsAtRoads`, `RasterStreamsToVector`, `RasterizeStreams`
-pub struct BurnStreams {
+pub struct BurnPaths {
     name: String,
     description: String,
     toolbox: String,
@@ -43,12 +43,12 @@ pub struct BurnStreams {
     example_usage: String,
 }
 
-impl BurnStreams {
+impl BurnPaths {
     /// public constructor
-    pub fn new() -> BurnStreams {
-        let name = "BurnStreams".to_string();
+    pub fn new() -> BurnPaths {
+        let name = "BurnPaths".to_string();
         let toolbox = "Hydrological Analysis".to_string();
-        let description = "Burn-in streams into an elevation raster.".to_string();
+        let description = "Burn-in paths into an elevation raster.".to_string();
 
         let mut parameters = vec![];
         parameters.push(ToolParameter{
@@ -61,9 +61,9 @@ impl BurnStreams {
         });
 
         parameters.push(ToolParameter {
-            name: "Input Vector Streams File".to_owned(),
-            flags: vec!["--streams".to_owned()],
-            description: "Input vector streams file.".to_owned(),
+            name: "Input Vector Paths File".to_owned(),
+            flags: vec!["--paths".to_owned()],
+            description: "Input vector paths file.".to_owned(),
             parameter_type: ParameterType::ExistingFile(ParameterFileType::Vector(
                 VectorGeometryType::Line,
             )),
@@ -74,10 +74,10 @@ impl BurnStreams {
         parameters.push(ToolParameter {
             name: "Field Name".to_owned(),
             flags: vec!["--order_by".to_owned()],
-            description: "Input field name in attributes table by which prioritise stream burning.".to_owned(),
+            description: "Input field name in attributes table by which prioritise path burning.".to_owned(),
             parameter_type: ParameterType::VectorAttributeField(
                 AttributeType::Number,
-                "--streams".to_string(),
+                "--paths".to_string(),
             ),
             default_value: Some("FID".to_owned()),
             optional: true,
@@ -114,10 +114,10 @@ impl BurnStreams {
         if e.contains(".exe") {
             short_exe += ".exe";
         }
-        let usage = format!(">>.*{0} -r={1} -v --wd=\"*path*to*data*\" --dem=raster.tif --streams=lines.shp -o=output.tif
-        >>.*{0} -r={1} -v --wd=\"*path*to*data*\" --dem=raster.tif --streams=lines.shp -o=output.tif --order_by=PRIORITY --flat_increment=0.01", short_exe, name).replace("*", &sep);
+        let usage = format!(">>.*{0} -r={1} -v --wd=\"*path*to*data*\" --dem=raster.tif --paths=lines.shp -o=output.tif
+        >>.*{0} -r={1} -v --wd=\"*path*to*data*\" --dem=raster.tif --paths=lines.shp -o=output.tif --order_by=PRIORITY --flat_increment=0.01", short_exe, name).replace("*", &sep);
 
-        BurnStreams {
+        BurnPaths {
             name: name,
             description: description,
             toolbox: toolbox,
@@ -127,7 +127,7 @@ impl BurnStreams {
     }
 }
 
-impl WhiteboxTool for BurnStreams {
+impl WhiteboxTool for BurnPaths {
     fn get_source_file(&self) -> String {
         String::from(file!())
     }
@@ -162,7 +162,7 @@ impl WhiteboxTool for BurnStreams {
         verbose: bool,
     ) -> Result<(), Error> {
         let mut dem_file = String::new();
-        let mut streams_file = String::new();
+        let mut paths_file = String::new();
         let mut field_name = String::from("FID");
         let mut output_file = String::new();
         let mut flat_increment = f64::NAN;
@@ -189,8 +189,8 @@ impl WhiteboxTool for BurnStreams {
                 } else {
                     args[i + 1].to_string()
                 };
-            } else if flag_val == "-streams" {
-                streams_file = if keyval {
+            } else if flag_val == "-paths" {
+                paths_file = if keyval {
                     vec[1].to_string()
                 } else {
                     args[i + 1].to_string()
@@ -240,23 +240,23 @@ impl WhiteboxTool for BurnStreams {
         let mut iter_progess: usize = 0;
         let mut old_progress: usize = 1;
 
-        if !streams_file.contains(&sep) && !streams_file.contains("/") {
-            streams_file = format!("{}{}", working_directory, streams_file);
+        if !paths_file.contains(&sep) && !paths_file.contains("/") {
+            paths_file = format!("{}{}", working_directory, paths_file);
         }
         if !output_file.contains(&sep) && !output_file.contains("/") {
             output_file = format!("{}{}", working_directory, output_file);
         }
 
         if verbose {
-            println!("Reading stream data...")
+            println!("Reading path data...")
         };
-        let streams = Shapefile::read(&streams_file).expect("Error reading input Shapefile.");
+        let paths = Shapefile::read(&paths_file).expect("Error reading input Shapefile.");
 
         let start = Instant::now();
 
         // Make sure the input vector file is of polyline type
         // Should explicitly look for LINESTRING only and not MULTILINESTRING ideally
-        if streams.header.shape_type.base_shape_type() != ShapeType::PolyLine
+        if paths.header.shape_type.base_shape_type() != ShapeType::PolyLine
         {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -265,7 +265,7 @@ impl WhiteboxTool for BurnStreams {
         }
 
         // What is the index of the field to be analyzed?
-        let field_index = match streams.attributes.get_field_num(&field_name) {
+        let field_index = match paths.attributes.get_field_num(&field_name) {
             Some(i) => i,
             None => {
                 // Field not found use FID
@@ -278,7 +278,7 @@ impl WhiteboxTool for BurnStreams {
         };
 
         // Is the field numeric?
-        if !streams.attributes.is_field_numeric(field_index) {
+        if !paths.attributes.is_field_numeric(field_index) {
             // Warn user of non-numeric
             if verbose {
                 println!("Warning: Non-numeric attributes cannot be used for ordering. FID will be used instead.");
@@ -288,10 +288,10 @@ impl WhiteboxTool for BurnStreams {
 
 
         // Get the attribute data
-        let mut attribute_data = vec![0u64; streams.num_records];
-        for record_num in 0..streams.num_records {
+        let mut attribute_data = vec![0u64; paths.num_records];
+        for record_num in 0..paths.num_records {
             if field_name != "FID" {
-                match streams.attributes.get_value(record_num, &field_name) {
+                match paths.attributes.get_value(record_num, &field_name) {
                     FieldData::Int(val) => {
                         attribute_data[record_num] = val as u64;
                     }
@@ -305,16 +305,16 @@ impl WhiteboxTool for BurnStreams {
         }
 
 
-        // Sort stream vectors based on the priority field
+        // Sort path vectors based on the priority field
         // My way of doing it is really ugly but it works
         // There is certainly a more elegent way of doing this
-        let idx: Vec<usize> = (0..streams.num_records).collect();
+        let idx: Vec<usize> = (0..paths.num_records).collect();
         let attribute_data_iter = attribute_data.into_iter();
         let mut tuple_attribute_data: Vec<(usize, u64)> = idx.into_iter().zip(attribute_data_iter).collect();
 
         tuple_attribute_data.sort_by_key(|k| k.1);
-        let mut record_num_sorted = vec![0; streams.num_records];
-        for record_num in 0..streams.num_records {
+        let mut record_num_sorted = vec![0; paths.num_records];
+        for record_num in 0..paths.num_records {
             record_num_sorted[record_num] = tuple_attribute_data[record_num].0;
         }
 
@@ -346,7 +346,7 @@ impl WhiteboxTool for BurnStreams {
         let start_point = 0 as usize;
         let mut end_point: usize;
         let mut output_something = false;
-        let num_records = streams.num_records;
+        let num_records = paths.num_records;
 
 
         // Set the small increment value to use
@@ -364,11 +364,11 @@ impl WhiteboxTool for BurnStreams {
 
 
 
-        // Loop over all stream lines
+        // Loop over all path lines
         // Could be parallelized by chunk of lines of the same priority (or lack of priority
         // if --order_by is not set) but it may not increase speed by much but might worth a try
         for record_num in record_num_sorted {
-            let record = streams.get_record(record_num);
+            let record = paths.get_record(record_num);
             let record_fid = record_num + 1;
 
             // Ensure that only singlepart polylines are used. This case should be catched right at loading
@@ -384,7 +384,7 @@ impl WhiteboxTool for BurnStreams {
 
 
 
-            // STREAM RASTERIZATION  (see vector_lines_to_raster.rs for reference)
+            // PATH RASTERIZATION  (see vector_lines_to_raster.rs for reference)
 
             end_point = record.num_points as usize - 1;
 
@@ -484,7 +484,7 @@ impl WhiteboxTool for BurnStreams {
                 }
             }
 
-            // Find the row/col intersection point of both ends of the stream
+            // Find the row/col intersection point of both ends of the path
             let row_start = dem.get_row_from_y(record.points[start_point].y);
             let col_start = dem.get_column_from_x(record.points[start_point].x);
             let row_end = dem.get_row_from_y(record.points[end_point].y);
@@ -494,12 +494,12 @@ impl WhiteboxTool for BurnStreams {
 
             // COST DISTANCE ANALYSIS TO FIND LEAST COST PATH  (see cost_distance.rs for reference)
 
-            // Make sure that both ends of the stream are included in the cost raster
-            // This is important if two independent streams are connected as the continuity is enforced.
+            // Make sure that both ends of the path are included in the cost raster
+            // This is important if two independent paths are connected as the continuity is enforced.
             cost.set_value(row_start, col_start, 1); 
             cost.set_value(row_end, col_end, 1);
 
-            // Set to zero the end of the stream for both the cost accumulation raster
+            // Set to zero the end of the path for both the cost accumulation raster
             // and the backlink raster (D8 pointer)
             accum.set_value(row_end, col_end, 0.0);  
             backlink.set_value(row_end, col_end, 0);
@@ -610,7 +610,7 @@ impl WhiteboxTool for BurnStreams {
                 progress = (100.0_f64 * iter_progess as f64 / num_records as f64) as usize;
                 if progress != old_progress {
                     println!(
-                        "Burning stream {} of {}: {}%",
+                        "Burning path {} of {}: {}%",
                         iter_progess,
                         num_records,
                         progress
@@ -620,7 +620,7 @@ impl WhiteboxTool for BurnStreams {
             }
 
             // Reset intermediary arrays only in the bbox touched by
-            // the current stream to save time
+            // the current path to save time
             for row in top_row..bottom_row + 1 {
                 for col in left_col..right_col + 1 {
                     cost.set_value(row, col, cost.nodata);
@@ -656,7 +656,7 @@ impl WhiteboxTool for BurnStreams {
 
 
         if !output_something && verbose {
-            println!("Warning: No streams were burned into the raster.");
+            println!("Warning: No paths were burned into the raster.");
         }
 
         if verbose {
