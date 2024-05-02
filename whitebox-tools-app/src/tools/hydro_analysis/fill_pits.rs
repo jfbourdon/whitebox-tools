@@ -206,7 +206,7 @@ impl WhiteboxTool for FillSingleCellPits {
                 let mut z: f64;
                 let mut zn: f64;
                 let mut min_zn: f64;
-                let mut flag: bool;
+                let mut is_pit: bool;
                 let small_val = 0.0001;
                 let dx = [1, 1, 1, 0, -1, -1, -1, 0];
                 let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
@@ -215,22 +215,22 @@ impl WhiteboxTool for FillSingleCellPits {
                     for col in 0..columns {
                         z = input[(row, col)];
                         if z != nodata {
-                            flag = true;
+                            is_pit = true;
                             min_zn = f64::INFINITY;
                             for n in 0..8 {
                                 zn = input.get_value(row + dy[n], col + dx[n]);
+                                if zn == nodata || zn < z {
+                                    is_pit = false;
+                                    break;
+                                }
                                 if zn < min_zn {
                                     min_zn = zn;
                                 }
-                                if zn != nodata && zn < z {
-                                    flag = false;
-                                    break;
-                                }
                             }
-                            if !flag {
-                                data[col as usize] = z;
-                            } else {
+                            if is_pit {
                                 data[col as usize] = min_zn + small_val;
+                            } else {
+                                data[col as usize] = z;
                             }
                         }
                     }
