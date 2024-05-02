@@ -202,20 +202,20 @@ impl WhiteboxTool for BreachSingleCellPits {
         let dy2 = [-2, -1, 0, 1, 2, 2, 2, 2, 2, 1, 0, -1, -2, -2, -2, -2];
         let breachcell = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 0];
         let (mut z, mut zn): (f64, f64);
-        let mut flag: bool;
+        let mut is_pit: bool;
         for row in 0..rows {
             for col in 0..columns {
                 z = input[(row, col)];
                 if z != nodata {
-                    flag = true;
+                    is_pit = true;
                     for i in 0..8 {
                         zn = input[(row + dy[i], col + dx[i])];
-                        if zn < z && zn != nodata {
-                            flag = false;
+                        if zn < z || zn == nodata {
+                            is_pit = false;
                             break;
                         }
                     }
-                    if flag {
+                    if is_pit {
                         // it's a pit cell
                         for i in 0..16 {
                             zn = input[(row + dy2[i], col + dx2[i])];
