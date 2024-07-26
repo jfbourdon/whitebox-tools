@@ -137,15 +137,6 @@ impl BreachDepressionsLeastCost {
         });
 
         parameters.push(ToolParameter {
-            name: "Maximum Breach Cost (z units)".to_owned(),
-            flags: vec!["--max_cost".to_owned()],
-            description: "Optional maximum breach cost (default is Inf).".to_owned(),
-            parameter_type: ParameterType::Float,
-            default_value: None,
-            optional: true,
-        });
-
-        parameters.push(ToolParameter {
             name: "Minimize breach distances?".to_owned(),
             flags: vec!["--min_dist".to_owned()],
             description: "Optional flag indicating whether to minimize breach distances."
@@ -165,13 +156,11 @@ impl BreachDepressionsLeastCost {
         });
 
         parameters.push(ToolParameter {
-            name: "Fill unbreached depressions?".to_owned(),
-            flags: vec!["--fill".to_owned()],
-            description:
-                "Optional flag indicating whether to fill any remaining unbreached depressions."
-                    .to_owned(),
-            parameter_type: ParameterType::Boolean,
-            default_value: Some("true".to_string()),
+            name: "Masking File".to_owned(),
+            flags: vec!["--mask".to_owned()],
+            description: "Masking file which indicate cells to leave untouched.".to_owned(),
+            parameter_type: ParameterType::ExistingFile(ParameterFileType::Raster),
+            default_value: None,
             optional: true,
         });
 
@@ -189,7 +178,7 @@ impl BreachDepressionsLeastCost {
             short_exe += ".exe";
         }
         let usage = format!(
-            ">>.*{0} -r={1} -v --wd=\"*path*to*data*\" --dem=DEM.tif -o=output.tif --dist=1000 --max_cost=100.0 --min_dist",
+            ">>.*{0} -r={1} -v --wd=\"*path*to*data*\" --dem=DEM.tif -o=output.tif --dist=1000",
             short_exe, name
         )
         .replace("*", &sep);
@@ -240,11 +229,9 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
     ) -> Result<(), Error> {
         let mut input_file = String::new();
         let mut output_file = String::new();
-        let mut max_cost = f64::INFINITY;
         let mut max_dist = 20isize;
         let mut flat_increment = f64::NAN;
-        let mut fill_deps = false;
-        let mut minimize_dist = false;
+        let mut mask_file = String::new();
 
         if args.len() == 0 {
             return Err(Error::new(
@@ -280,18 +267,6 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                 } else {
                     args[i + 1].to_string().parse::<isize>().unwrap()
                 };
-            } else if flag_val == "-max_cost" {
-                max_cost = if keyval {
-                    vec[1]
-                        .to_string()
-                        .parse::<f64>()
-                        .expect(&format!("Error parsing {}", flag_val))
-                } else {
-                    args[i + 1]
-                        .to_string()
-                        .parse::<f64>()
-                        .expect(&format!("Error parsing {}", flag_val))
-                };
             } else if flag_val == "-flat_increment" {
                 flat_increment = if keyval {
                     vec[1]
@@ -304,14 +279,12 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                         .parse::<f64>()
                         .expect(&format!("Error parsing {}", flag_val))
                 };
-            } else if flag_val == "-min_dist" {
-                if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
-                    minimize_dist = true;
-                }
-            } else if flag_val == "-fill" {
-                if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
-                    fill_deps = true;
-                }
+            }  else if flag_val == "-mask" {
+                mask_file = if keyval {
+                    vec[1].to_string()
+                } else {
+                    args[i + 1].to_string()
+                };
             }
         }
 
@@ -356,9 +329,8 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let dx = [1, 1, 1, 0, -1, -1, -1, 0];
         let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
         let mut flag: bool;
+        let mut is_in_mask: bool;
         let mut num_solved: usize;
-        // let mut overall_num_solved = 0;
-        let mut num_unsolved = 0;
         let resx = input.configs.resolution_x;
         let resy = input.configs.resolution_y;
         let diagres = (resx * resx + resy * resy).sqrt();
@@ -376,7 +348,44 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
             num_procs = max_procs;
         }
 
-        let small_num = if !flat_increment.is_nan() || flat_increment == 0f64 {
+
+        // Éventuellement convertir le raster pour faire en sorte qu'il soit seulement 8 bits plutôt que 64 bits
+        // Toute valeur supérieure à 0.0 fera partie du masque
+        let mask_f64 = Arc::new(Raster::new(&mask_file, "r").expect("Error reading mask raster file"));
+        
+        // Make sure the mask_file has the same size of the input file (resolution is assumed to be the same)
+        if input.configs.rows != mask_f64.configs.rows  || input.configs.columns != mask_f64.configs.columns {
+            return Err(Error::new(ErrorKind::InvalidInput,
+                                "The mask and dem raster files must have the same number of rows and columns and spatial extent."));
+        }
+
+        // Transposition des valeurs dans un masque 8bit
+        // Tout ce qui n'est pas 0 fera partie du masque
+        let mut mask: Array2D<u8> = Array2D::new(rows, columns, 0u8, 0u8)?;
+        for row in 0..rows {
+            for col in 0..columns {
+                z = mask_f64.get_value(row, col);
+                if z != 0.0 {
+                    mask.set_value(row, col, 1u8);
+                }
+            }
+        }
+        
+        drop(mask_f64);
+
+        // 1 - Procéder à l'ajustement des pixels en bordure du masque pour éviter,
+        //     On parle ici d'un abaissement ou élévation des pixels pour éviter tout débordement ou attirance
+        //     des pixels sous le masque. Penser que je dois respecter le sens d'écoulement d'origine des pixels
+        //     à l'intérieur du masque (cas de l'exutoire par exemple). je dois donc considérer le cas où l'eau
+        //     entre naturellement dans la zone d'intérêt
+
+        // 2 - Glonfler le masque d'une largeur de 1 pixel pour englober les pixels modifiés à l'extérieur du
+        //     masque initial et ainsi s'assurer qu'on ne touche plus à ces pixels.
+        //     Aller récupérer le code de closing.rs et/ou max_filter.rs
+
+
+
+        let small_num = if !flat_increment.is_nan() && flat_increment > 0f64 {
             flat_increment
         } else {
             let elev_digits = (input.configs.maximum as i32).to_string().len();
