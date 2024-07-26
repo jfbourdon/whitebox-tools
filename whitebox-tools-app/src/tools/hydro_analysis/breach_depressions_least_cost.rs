@@ -534,11 +534,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                             zout = z - (length_n as f64 * small_num);
                             if zn > zout && zn != nodata {
                                 cost2 = zn - zout;
-                                new_cost = if minimize_dist {
-                                    accum + (cost1 + cost2) / 2f64 * cost_dist[n]
-                                } else {
-                                    accum + cost2
-                                };
+                                new_cost = accum + (cost1 + cost2) / 2f64 * cost_dist[n];  // on considère qu'on veut toujours minimiser la distance
                                 encountered.set_value(rn, cn, 1i8);
                                 if length_n <= max_length {
                                     minheap.push(GridCell {
