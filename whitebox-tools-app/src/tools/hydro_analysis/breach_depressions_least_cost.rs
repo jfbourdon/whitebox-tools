@@ -468,6 +468,8 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
 
         /* Vec is a stack and so if we want to pop the values from lowest to highest, we need to sort
         them from highest to lowest. */
+        undefined_flow_cells.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Equal));
+        undefined_flow_cells.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
         undefined_flow_cells.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(Equal));
         let num_deps = undefined_flow_cells.len();
         if num_deps == 0 && verbose {
