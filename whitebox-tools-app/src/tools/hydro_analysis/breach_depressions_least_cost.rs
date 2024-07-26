@@ -518,13 +518,6 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                 while !minheap.is_empty() && flag {
                     let cell2 = minheap.pop().expect("Error during pop operation.");
                     accum = cell2.priority;
-                    if accum > max_cost {
-                        // There isn't a breach channel cheap enough
-                        undefined_flow_cells2.push((row, col, z)); // Add it to the list for the filling step
-                        num_unsolved += 1;
-                        flag = false;
-                        break;
-                    }
                     length = path_length.get_value(cell2.row, cell2.column);
                     zn = output.get_value(cell2.row, cell2.column);
                     cost1 = zn - z + length as f64 * small_num;
