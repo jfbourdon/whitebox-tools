@@ -349,11 +349,11 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         }
 
 
-        // Éventuellement convertir le raster pour faire en sorte qu'il soit seulement 8 bits plutôt que 64 bits
-        // Toute valeur supérieure à 0.0 fera partie du masque
-        let mask_f64 = Arc::new(Raster::new(&mask_file, "r").expect("Error reading mask raster file"));
+        let mut mask_raw = Array2D::new(rows, columns, 0u8, 0u8)?;
+        if !mask_file.is_empty() {
+            let mask_f64 = Raster::new(&mask_file, "r").expect("Error reading mask raster file");
         
-        // Make sure the mask_file has the same size of the input file (resolution is assumed to be the same)
+            // Make sure the mask file has the same size of the input file (resolution is assumed to be the same)
         if input.configs.rows != mask_f64.configs.rows  || input.configs.columns != mask_f64.configs.columns {
             return Err(Error::new(ErrorKind::InvalidInput,
                                 "The mask and dem raster files must have the same number of rows and columns and spatial extent."));
@@ -361,17 +361,19 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
 
         // Transposition des valeurs dans un masque 8bit
         // Tout ce qui n'est pas 0 fera partie du masque
-        let mut mask: Array2D<u8> = Array2D::new(rows, columns, 0u8, 0u8)?;
         for row in 0..rows {
             for col in 0..columns {
                 z = mask_f64.get_value(row, col);
                 if z != 0.0 {
-                    mask.set_value(row, col, 1u8);
+                        mask_raw.set_value(row, col, 1u8);
                 }
             }
         }
         
         drop(mask_f64);
+        }
+        let mask = Arc::new(mask_raw.clone());
+        drop(mask_raw);
 
         // 1 - Procéder à l'ajustement des pixels en bordure du masque pour éviter,
         //     On parle ici d'un abaissement ou élévation des pixels pour éviter tout débordement ou attirance
@@ -403,9 +405,10 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let (tx, rx) = mpsc::channel();
         for tid in 0..num_procs {
             let input = input.clone();
+            let mask = mask.clone();
             let tx = tx.clone();
             thread::spawn(move || {
-                let (mut z, mut zn, mut min_zn): (f64, f64, f64);
+                let (mut z, mut zn, mut min_zn, mut zm): (f64, f64, f64, u8);
                 let mut flag: bool;
                 let dx = [1, 1, 1, 0, -1, -1, -1, 0];
                 let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
@@ -415,6 +418,9 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                     for col in 0..columns {
                         z = input.get_value(row, col);
                         if z != nodata {
+                            // Proceed only if the cell is not inside the mask
+                            zm = mask.get_value(row, col);
+                            if zm == 0 {
                             flag = true;
                             min_zn = f64::INFINITY;
                             for n in 0..8 {
@@ -439,13 +445,13 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                             }
                         }
                     }
+                    }
                     tx.send((row, data, pits)).unwrap();
                 }
             });
         }
 
         let mut undefined_flow_cells: Vec<(isize, isize, f64)> = vec![];
-        let mut undefined_flow_cells2 = vec![];
         for r in 0..rows {
             let (row, data, mut pits) = rx.recv().expect("Error receiving data from thread.");
             output.set_row_data(row, data);
