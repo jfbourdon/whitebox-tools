@@ -312,7 +312,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         }
 
         if verbose {
-            println!("Reading data...")
+            println!("Reading DEM")
         };
 
         let input = Arc::new(Raster::new(&input_file, "r").expect("Error reading input raster"));
@@ -329,7 +329,6 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let dx = [1, 1, 1, 0, -1, -1, -1, 0];
         let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
         let mut flag: bool;
-        let mut is_in_mask: bool;
         let mut num_solved: usize;
         let resx = input.configs.resolution_x;
         let resy = input.configs.resolution_y;
@@ -349,8 +348,9 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         }
 
 
-        let mut mask_raw = Array2D::new(rows, columns, 0u8, 0u8)?;
+        let mut mask = Array2D::new(rows, columns, 0i8, 0i8)?;
         if !mask_file.is_empty() {
+            println!("Reading mask");
             let mask_f64 = Raster::new(&mask_file, "r").expect("Error reading mask raster file");
         
             // Make sure the mask file has the same size of the input file (resolution is assumed to be the same)
@@ -365,15 +365,15 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
             for col in 0..columns {
                 z = mask_f64.get_value(row, col);
                 if z != 0.0 {
-                        mask_raw.set_value(row, col, 1u8);
+                        mask.set_value(row, col, 1i8);
                 }
             }
         }
         
         drop(mask_f64);
         }
-        let mask = Arc::new(mask_raw.clone());
-        drop(mask_raw);
+        let mask = Arc::new(mask.clone());
+
 
         // 1 - Procéder à l'ajustement des pixels en bordure du masque pour éviter,
         //     On parle ici d'un abaissement ou élévation des pixels pour éviter tout débordement ou attirance
@@ -381,20 +381,51 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         //     à l'intérieur du masque (cas de l'exutoire par exemple). je dois donc considérer le cas où l'eau
         //     entre naturellement dans la zone d'intérêt
 
-        // 2 - Glonfler le masque d'une largeur de 1 pixel pour englober les pixels modifiés à l'extérieur du
-        //     masque initial et ainsi s'assurer qu'on ne touche plus à ces pixels.
-        //     Aller récupérer le code de closing.rs et/ou max_filter.rs
 
 
 
-        let small_num = if !flat_increment.is_nan() && flat_increment > 0f64 {
-            flat_increment
-        } else {
-            let elev_digits = (input.configs.maximum as i32).to_string().len();
-            let elev_multiplier = 10.0_f64.powi((9 - elev_digits) as i32);
-            1.0_f64 / elev_multiplier as f64 * diagres.ceil()
-        };
 
+
+
+        // Grossi d'un pixel le masque afin d'englober les pixels de bordure du masque, soit les pixels qui ne
+        // doivent pas être modifiés par le remplissage ou le bréchage afin de ne pas compromettre l'hydrocohérence
+        // avec les bassins versants voisins
+        let mut mask_expand = Array2D::new(rows, columns, 0i8, 0i8)?;
+        if !mask_file.is_empty() {
+            println!("Expanding mask");
+            let (tx, rx) = mpsc::channel();
+            for tid in 0..num_procs {
+                let mask = mask.clone();
+                let tx = tx.clone();
+                thread::spawn(move || {
+                    let mut z_n: i8;
+                    let dx = [1, 1, 1, 0, -1, -1, -1, 0, 0];
+                    let dy = [-1, 0, 1, 1, 1, 0, -1, -1, 0];
+                    for row in (0..rows).filter(|r| r % num_procs == tid) {
+                        let mut data = vec![0i8; columns as usize];
+                        for col in 0..columns {
+                            for i in 0..9 {
+                                z_n = mask.get_value(row + dy[i], col + dx[i]);
+                                if z_n == 1i8 {
+                                    data[col as usize] = 1i8;
+                                    break;
+                                }
+                            }
+                        }
+                        tx.send((row, data)).unwrap();
+                    }
+                });
+            }
+
+            for _ in 0..rows {
+                let (row, data) = rx.recv().expect("Error receiving data from thread.");
+                mask_expand.set_row_data(row, data);
+            }
+        }
+        let mask_expand = Arc::new(mask_expand.clone());
+
+
+        let small_num = flat_increment;
         let mut output = Raster::initialize_using_file(&output_file, &input);
         // Even if the input is f32, the output will need to be 64-bit to represent the small elevation differences
         output.configs.data_type = DataType::F64;
@@ -402,14 +433,18 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let display_max = input.configs.display_max;
 
         // Raise pit cells to minimize the depth of breach channels.
+        // Only cells outside the mask will be checked and only the
+        // cells that aren't on the edge of the mask will be raised.
+        println!("Finding pits");
         let (tx, rx) = mpsc::channel();
         for tid in 0..num_procs {
             let input = input.clone();
             let mask = mask.clone();
+            let mask_expand = mask_expand.clone();
             let tx = tx.clone();
             thread::spawn(move || {
-                let (mut z, mut zn, mut min_zn, mut zm): (f64, f64, f64, u8);
-                let mut flag: bool;
+                let (mut z, mut zn, mut min_zn, mut zm, mut zme): (f64, f64, f64, i8, i8);
+                let mut is_pit: bool;
                 let dx = [1, 1, 1, 0, -1, -1, -1, 0];
                 let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
                 for row in (0..rows).filter(|r| r % num_procs == tid) {
@@ -418,29 +453,33 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                     for col in 0..columns {
                         z = input.get_value(row, col);
                         if z != nodata {
-                            // Proceed only if the cell is not inside the mask
+                            // Proceed only if the cell isn't inside the mask
                             zm = mask.get_value(row, col);
-                            if zm == 0 {
-                            flag = true;
+                            if zm == 0i8 {
+                                is_pit = true;
                             min_zn = f64::INFINITY;
                             for n in 0..8 {
                                 zn = input.get_value(row + dy[n], col + dx[n]);
-                                if zn < min_zn {
-                                    min_zn = zn;
+                                    if zn < z {
+                                        // There's a lower neighbour
+                                        is_pit = false;
+                                        break;
                                 }
                                 if zn == nodata {
-                                    // It's an edge cell.
-                                    flag = false;
+                                        // It's an edge cell
+                                        is_pit = false;
                                     break;
                                 }
-                                if zn < z {
-                                    // There's a lower neighbour
-                                    flag = false;
-                                    break;
+                                    if zn < min_zn {
+                                        min_zn = zn;
                                 }
                             }
-                            if flag {
+                                if is_pit {
+                                    // Raise pit only if it isn't inside the expanded mask
+                                    zme = mask_expand.get_value(row, col);
+                                    if zme == 0i8 {
                                 data[col as usize] = min_zn - small_num;
+                                    }
                                 pits.push((row, col, z));
                             }
                         }
@@ -452,18 +491,10 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         }
 
         let mut undefined_flow_cells: Vec<(isize, isize, f64)> = vec![];
-        for r in 0..rows {
+        for _ in 0..rows {
             let (row, data, mut pits) = rx.recv().expect("Error receiving data from thread.");
             output.set_row_data(row, data);
             undefined_flow_cells.append(&mut pits);
-
-            if verbose {
-                progress = (100.0_f64 * r as f64 / (rows - 1) as f64) as usize;
-                if progress != old_progress {
-                    println!("Finding pits: {}%", progress);
-                    old_progress = progress;
-                }
-            }
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -478,19 +509,31 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         undefined_flow_cells.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
         undefined_flow_cells.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(Equal));
         let num_deps = undefined_flow_cells.len();
-        if num_deps == 0 && verbose {
-            println!("No depressions found. Process ending...");
-        }
-
+        println!("Number of pits found: {}", num_deps);
         num_solved = 0;
         let backlink_dir = [4i8, 5, 6, 7, 0, 1, 2, 3];
         let mut backlink: Array2D<i8> = Array2D::new(rows, columns, -1, -2)?;
-        let mut encountered: Array2D<i8> = Array2D::new(rows, columns, 0, -1)?;
         let mut path_length: Array2D<i16> = Array2D::new(rows, columns, 0, -1)?;
         let mut scanned_cells = vec![];
         let max_length = max_dist as i16;
         let filter_size = ((max_dist * 2 + 1) * (max_dist * 2 + 1)) as usize;
         let mut minheap = BinaryHeap::with_capacity(filter_size);
+
+
+        // Remplissage de la couche des pixels rencontrés avec la couche de masque (gonflé) afin d'être
+        // certain que l'algorithme ne touche pas aux pixels du masque
+        let mut encountered: Array2D<i8> = Array2D::new(rows, columns, 0, -1)?;
+        for row in 0..rows {
+            for col in 0..columns {
+                encountered.set_value(row, col, mask_expand.get_value(row, col))
+            }
+        }
+
+
+
+        ////////////////////////////////
+        // Start of least cost breaching
+        ////////////////////////////////
         while let Some(cell) = undefined_flow_cells.pop() {
             row = cell.0;
             col = cell.1;
@@ -582,10 +625,25 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                     path_length.set_value(cell2.0, cell2.1, 0i16);
                 }
 
-                if flag {
-                    // Didn't find any lower cells.
-                    undefined_flow_cells2.push((row, col, z)); // Add it to the list for the next iteration
-                    num_unsolved += 1;
+                // Reset to initial value of the on encountered array for the first cell
+                // This is needed for cells on the edge of the mask in order to prevent the algorithm
+                // editing the cells value on a subsequent breaching operation
+                encountered.set_value(row, col, mask_expand.get_value(row, col));
+            }
+
+            if verbose {
+                progress = (100.0_f64 * (1f64 - (undefined_flow_cells.len()) as f64 / (num_deps - 1) as f64)) as usize;
+                if progress != old_progress {
+                    println!("Breaching: {}%", progress);
+                    old_progress = progress;
+                }
+            }
+        }
+        if verbose {
+            println!("Number of pits solved: {}", num_solved);
+        }
+
+
                 }
             }
 
