@@ -152,7 +152,7 @@ impl BreachDepressionsLeastCost {
             description: "Optional elevation increment applied to flat areas.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: None,
-            optional: true,
+            optional: false,
         });
 
         parameters.push(ToolParameter {
@@ -312,10 +312,10 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         }
 
         if verbose {
-            println!("Reading DEM")
+            println!("Reading DEM...")
         };
 
-        let input = Arc::new(Raster::new(&input_file, "r").expect("Error reading input raster"));
+        let mut input = Arc::new(Raster::new(&input_file, "r").expect("Error reading input raster")); // Retirer le mut quand j'aurai changé le nom de variable dasn BreachDepressions
 
         let start = Instant::now();
 
@@ -339,7 +339,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let mut new_cost: f64;
         let mut length: i16;
         let mut length_n: i16;
-        let mut b: usize;
+        let small_num = flat_increment;
         let mut num_procs = num_cpus::get() as isize;
         let configs = whitebox_common::configs::get_configs()?;
         let max_procs = configs.max_procs;
@@ -350,40 +350,29 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
 
         let mut mask = Array2D::new(rows, columns, 0i8, 0i8)?;
         if !mask_file.is_empty() {
-            println!("Reading mask");
+            println!("Reading mask...");
             let mask_f64 = Raster::new(&mask_file, "r").expect("Error reading mask raster file");
         
             // Make sure the mask file has the same size of the input file (resolution is assumed to be the same)
-        if input.configs.rows != mask_f64.configs.rows  || input.configs.columns != mask_f64.configs.columns {
-            return Err(Error::new(ErrorKind::InvalidInput,
-                                "The mask and dem raster files must have the same number of rows and columns and spatial extent."));
-        }
-
-        // Transposition des valeurs dans un masque 8bit
-        // Tout ce qui n'est pas 0 fera partie du masque
-        for row in 0..rows {
-            for col in 0..columns {
-                z = mask_f64.get_value(row, col);
-                if z != 0.0 {
+            if input.configs.rows != mask_f64.configs.rows  || input.configs.columns != mask_f64.configs.columns {
+                return Err(Error::new(ErrorKind::InvalidInput,
+                                    "The mask and dem raster files must have the same number of rows and columns and spatial extent."));
+            }
+    
+            // Transposition des valeurs dans un masque 8bit
+            // Tout ce qui n'est pas 0 fera partie du masque
+            for row in 0..rows {
+                for col in 0..columns {
+                    z = mask_f64.get_value(row, col);
+                    if z != 0.0 {
                         mask.set_value(row, col, 1i8);
+                    }
                 }
             }
-        }
-        
-        drop(mask_f64);
+            
+            drop(mask_f64);
         }
         let mask = Arc::new(mask.clone());
-
-
-        // 1 - Procéder à l'ajustement des pixels en bordure du masque pour éviter,
-        //     On parle ici d'un abaissement ou élévation des pixels pour éviter tout débordement ou attirance
-        //     des pixels sous le masque. Penser que je dois respecter le sens d'écoulement d'origine des pixels
-        //     à l'intérieur du masque (cas de l'exutoire par exemple). je dois donc considérer le cas où l'eau
-        //     entre naturellement dans la zone d'intérêt
-
-
-
-
 
 
 
@@ -392,7 +381,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         // avec les bassins versants voisins
         let mut mask_expand = Array2D::new(rows, columns, 0i8, 0i8)?;
         if !mask_file.is_empty() {
-            println!("Expanding mask");
+            println!("Expanding mask...");
             let (tx, rx) = mpsc::channel();
             for tid in 0..num_procs {
                 let mask = mask.clone();
@@ -425,17 +414,39 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let mask_expand = Arc::new(mask_expand.clone());
 
 
-        let small_num = flat_increment;
-        let mut output = Raster::initialize_using_file(&output_file, &input);
+
+
+
+        // Procéder à l'ajustement des pixels en bordure du masque pour éviter,
+        // On parle ici d'un abaissement ou d'une élévation des pixels pour éviter tout débordement ou attraction
+        // des pixels sous le masque. Penser que je dois respecter le sens d'écoulement d'origine des pixels
+        // à l'intérieur du masque (cas de l'exutoire par exemple). Je dois donc considérer le cas où l'eau
+        // entre naturellement dans la zone d'intérêt. Les cellules à potentiellement modifier sont celles
+        // qui appartiennent à "mask_expand" mais pas à "mask". 
+
+        // Initialement, je n'ai pas absolument besoin de faire cet ajustement car je peux fusionner un MNT
+        // hydrocohérent qui irait quelques pixels (au moins 2) au-delà du bassin versant principal. Dans le fond,
+        // si j'amène toujours quelques pixels débordants et que jamais deux pixels de source différentes (provenant
+        // de deux bv adjacents déjà traités par exemple) se superposent, je n'aurai jamais à faire d'ajustement.
+        // Je dois seulement maintenir rigoureusement un index indiquant l'ordre de traitement des bv. Je pourrais m'assurer
+        // de ce suivi en stockant pour chaque UD, quels étaient les fichiers (nom du répertoire, voire même un SHA128 du fichier même)
+        // qui ont été utilisés dans le masque.
+
+
+
+
+
+        let mut output = Raster::initialize_using_file("C:/Temp/wbt_BDLC_mask/dem_fused_bdlc_only.sdat", &input);
+        //let mut output = Raster::initialize_using_file(&output_file, &input);  // Changer éventuellement de nom
         // Even if the input is f32, the output will need to be 64-bit to represent the small elevation differences
         output.configs.data_type = DataType::F64;
-        let display_min = input.configs.display_min;
-        let display_max = input.configs.display_max;
+
+
 
         // Raise pit cells to minimize the depth of breach channels.
         // Only cells outside the mask will be checked and only the
         // cells that aren't on the edge of the mask will be raised.
-        println!("Finding pits");
+        println!("Finding pits...");
         let (tx, rx) = mpsc::channel();
         for tid in 0..num_procs {
             let input = input.clone();
@@ -457,33 +468,34 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                             zm = mask.get_value(row, col);
                             if zm == 0i8 {
                                 is_pit = true;
-                            min_zn = f64::INFINITY;
-                            for n in 0..8 {
-                                zn = input.get_value(row + dy[n], col + dx[n]);
+                                min_zn = f64::INFINITY;
+                                for n in 0..8 {
+                                    zn = input.get_value(row + dy[n], col + dx[n]);
                                     if zn < z {
                                         // There's a lower neighbour
                                         is_pit = false;
                                         break;
-                                }
-                                if zn == nodata {
+                                    }
+                                    if zn == nodata {
                                         // It's an edge cell
                                         is_pit = false;
-                                    break;
-                                }
+                                        break;
+                                    }
                                     if zn < min_zn {
                                         min_zn = zn;
+                                    }
                                 }
-                            }
                                 if is_pit {
                                     // Raise pit only if it isn't inside the expanded mask
                                     zme = mask_expand.get_value(row, col);
                                     if zme == 0i8 {
-                                data[col as usize] = min_zn - small_num;
+                                        z = min_zn - small_num;
+                                        data[col as usize] = z;
                                     }
-                                pits.push((row, col, z));
+                                    pits.push((row, col, z));
+                                }
                             }
                         }
-                    }
                     }
                     tx.send((row, data, pits)).unwrap();
                 }
@@ -516,6 +528,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let mut path_length: Array2D<i16> = Array2D::new(rows, columns, 0, -1)?;
         let mut scanned_cells = vec![];
         let max_length = max_dist as i16;
+        let mut b: usize;
         let filter_size = ((max_dist * 2 + 1) * (max_dist * 2 + 1)) as usize;
         let mut minheap = BinaryHeap::with_capacity(filter_size);
 
@@ -532,7 +545,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
 
 
         ////////////////////////////////
-        // Start of least cost breaching
+        // Least cost breaching
         ////////////////////////////////
         while let Some(cell) = undefined_flow_cells.pop() {
             row = cell.0;
@@ -644,40 +657,238 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         }
 
 
+        let _ = output.write();
+
+        // Mise à NoData des cellules sous le masque (sans buffer)
+        // pour permettre à BreachDepressions de bien venir s'accoter sur le MNT à brécher
+        let mut zz: i8;
+        for row in 0..rows {
+            for col in 0..columns {
+                zz = mask.get_value(row, col);
+                if zz == 1i8 {
+                    output.set_value(row, col, nodata);
+                }
+            }
+        }
+        
+
+
+
+
+
+        ////////////////////////////////
+        // Final breaching (from breach_depression.rs)
+        ////////////////////////////////
+
+
+
+        let mut output_final = Raster::initialize_using_file(&output_file, &output);
+        let background_val = (i32::min_value() + 1) as f64;
+        output_final.reinitialize_values(background_val);
+        input = Arc::new(output);  // Pas besoin d'un Arc ici, c'est juste pour être compatible avec le input original. Changer le nom de variable à la place.
+        let num_cells = rows * columns;
+        
+
+        /*
+        Find the data edges. This is complicated by the fact that DEMs frequently
+        have nodata edges, whereby the DEM does not occupy the full extent of
+        the raster. One approach to doing this would be simply to scan the
+        raster, looking for cells that neighbour nodata values. However, this
+        assumes that there are no interior nodata holes in the dataset. Instead,
+        the approach used here is to perform a region-growing operation, looking
+        for nodata values along the raster's edges.
+        */
+
+        let mut queue: VecDeque<(isize, isize)> = VecDeque::with_capacity((rows * columns) as usize);
+        for row in 0..rows {
+            /*
+            Note that this is only possible because Whitebox rasters
+            allow you to address cells beyond the raster extent but
+            return the nodata value for these regions.
+            */
+            queue.push_back((row, -1));
+            queue.push_back((row, columns));
+        }
+
+        for col in 0..columns {
+            queue.push_back((-1, col));
+            queue.push_back((rows, col));
+        }
+
+        // "minheap" contient les premières cellules valides du MNT rencontrées à partir de la
+        // bordure extérieure de la matrice. Le min heap est classé en ordre croissant
+        // des élévations
+
+        // "queue" est un deque contenant les cellules NoData du MNT à partir desquelles
+        // poursuivre la recherche des cellules valides. Le deque se vide donc une fois
+        // tout le contour du MNT exploré
+        println!("Finding valid cells on the edge of raster DEM...");
+        let mut minheap = BinaryHeap::with_capacity((rows * columns) as usize);
+        let mut num_solved_cells = 0;
+        let mut zin_n: f64; // value of neighbour of row, col in input raster
+        let mut zout: f64; // value of row, col in output_final raster
+        let mut zout_n: f64; // value of neighbour of row, col in output_final raster
+        let (mut row, mut col): (isize, isize);
+        let (mut row_n, mut col_n): (isize, isize);
+        while !queue.is_empty() {
+            let cell = queue.pop_front().unwrap();
+            row = cell.0;
+            col = cell.1;
+            for n in 0..8 {
+                row_n = row + dy[n];
+                col_n = col + dx[n];
+                zin_n = input.get_value(row_n, col_n);
+                zout_n = output_final.get_value(row_n, col_n);
+                if zout_n == background_val {
+                    output_final.set_value(row_n, col_n, zin_n);
+                    if zin_n == nodata {
+                        // Si la cellule voisine est du nodata dans la couche en entrée,
+                        // on l'ajoute au deque pour visiter ses propres voisins ultérieurement
+                        queue.push_back((row_n, col_n));
+                    } else {
+                        // Push it onto the priority queue for the priority flood operation
+                        minheap.push(GridCell2 {
+                            row: row_n,
+                            column: col_n,
+                            priority: zin_n,
+                        });
+                    }
+                }
+            }
+        }
+
+
+
+        // Perform the priority flood operation.
+        let back_link = [4i8, 5i8, 6i8, 7i8, 0i8, 1i8, 2i8, 3i8];
+        let (mut x, mut y): (isize, isize);
+        let mut z_target: f64;
+        let mut dir: i8;
+        let mut zm_n: i8;
+        let mut flag: bool;
+        let mut flow_dir: Array2D<i8> = Array2D::new(rows, columns, -1, -1)?;
+
+        while !minheap.is_empty() {
+            let cell = minheap.pop().expect("Error during pop operation.");
+            row = cell.row;
+            col = cell.column;
+            zout = output_final.get_value(row, col);
+
+            if row == 1524 && col == 2217 {
+                println!("Cell row:{}  col:{}  zout:{}", row, col, zout);
+            }
+            
+            for n in 0..8 {
+                row_n = row + dy[n];
+                col_n = col + dx[n];
+                zout_n = output_final.get_value(row_n, col_n);
+                if zout_n == background_val {
+                    zin_n = input.get_value(row_n, col_n);
+                    //zm_n = mask_expand.get_value(row_n, col_n);
+
+                    // Si le voisin n'est pas du NoData, alors on calcule la direction de flux inverse
+                    // et on inscrit l'élévation dans le fichier de sortie
+                    //if zin_n != nodata && zm_n != 1i8 {
+                    if zin_n != nodata {
+                        flow_dir.set_value(row_n, col_n, back_link[n]);
+                        output_final.set_value(row_n, col_n, zin_n);
+                        minheap.push(GridCell2 {
+                            row: row_n,
+                            column: col_n,
+                            priority: zin_n,
+                        });
+                        
+
+                        if row == 1524 && col == 2217 {
+                            println!("Cell row_n:{}  col_n:{}  zin_n:{}", row_n, col_n, zin_n);
+                        }
+
+                        if zin_n < (zout + small_num) {
+                            // Si une cellule voisine "zin_n" est plus basse que que la
+                            // cellule centrale "zout" plus l'incrément "small_num", alors
+                            // là seulement on va tenter de trouver un ... exutoire? Je pense que c'est comme à l'inverse...
+
+                            // Trace the flowpath back to a lower cell, if it exists.
+                            x = col_n;
+                            y = row_n;
+                            z_target = output_final.get_value(row_n, col_n);
+
+                            flag = true;
+                            while flag {
+                                dir = flow_dir[(y, x)];
+                                if dir >= 0 {
+                                    y += dy[dir as usize];
+                                    x += dx[dir as usize];
+                                    z_target -= small_num;
+                                    if output_final.get_value(y, x) > z_target {
+                                        output_final.set_value(y, x, z_target);
+                                    } else {
+                                        flag = false;
+                                    }
+                                } else {
+                                    flag = false;
+                                }
+                            }
+                        }
+                    } else {
+                        // Interior nodata cells are still treated as nodata and are not filled.
+                        output_final.set_value(row_n, col_n, nodata);
+                        num_solved_cells += 1;
+                        // region growing operation to find all attached nodata cells
+                        queue.push_back((row_n, col_n));
+                        while !queue.is_empty() {
+                            let cell = queue.pop_front().unwrap();
+                            for n2 in 0..8 {
+                                let row2 = cell.0 + dy[n2];
+                                let col2 = cell.1 + dx[n2];
+                                if input.get_value(row2, col2) == nodata
+                                    && output_final.get_value(row2, col2) == background_val
+                                {
+                                    if row2 >= 0 && row2 < rows && col2 >= 0 && col2 < columns {
+                                        output_final.set_value(row2, col2, nodata);
+                                        num_solved_cells += 1;
+                                        queue.push_back((row2, col2));
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
             if verbose {
-                progress = (100.0_f64
-                    * (1f64 - (undefined_flow_cells.len()) as f64 / (num_deps - 1) as f64))
-                    as usize;
+                num_solved_cells += 1;
+                progress =
+                    (100.0_f64 * num_solved_cells as f64 / (num_cells - 1) as f64) as usize;
                 if progress != old_progress {
-                    println!("Breaching: {}%", progress);
+                    println!("Progress last breaching: {}%", progress);
                     old_progress = progress;
                 }
             }
         }
-        if verbose {
-            println!("Num. solved pits: {}", num_solved);
-            }
+
+
+
+
+
+
 
 
         let elapsed_time = get_formatted_elapsed_time(start);
-        output.configs.display_min = display_min;
-        output.configs.display_max = display_max;
-        output.add_metadata_entry(format!(
+
+        output_final.add_metadata_entry(format!(
             "Created by whitebox_tools\' {} tool",
             self.get_tool_name()
         ));
-        output.add_metadata_entry(format!("Input file: {}", input_file));
-        output.add_metadata_entry(format!("Maximum search distance: {}", max_dist));
-        output.add_metadata_entry(format!("Flat elevation increment: {}", small_num));
-        output.add_metadata_entry(format!("Elapsed Time (excluding I/O): {}", elapsed_time));
+        output_final.add_metadata_entry(format!("Input file: {}", input_file));
+        output_final.add_metadata_entry(format!("Maximum search distance: {}", max_dist));
+        output_final.add_metadata_entry(format!("Flat elevation increment: {}", small_num));
+        output_final.add_metadata_entry(format!("Elapsed Time (excluding I/O): {}", elapsed_time));
 
         if verbose {
             println!("Saving data...")
         };
-        let _ = match output.write() {
+        let _ = match output_final.write() {
             Ok(_) => {
                 if verbose {
                     println!("Output file written")
@@ -717,24 +928,31 @@ impl Ord for GridCell {
     }
 }
 
-#[derive(PartialEq, Debug)]
-struct GridCell2 {
-    row: isize,
-    column: isize,
-    z: f64,
-    priority: f64,
-}
 
-impl Eq for GridCell2 {}
 
-impl PartialOrd for GridCell2 {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        other.priority.partial_cmp(&self.priority)
-    }
-}
-
-impl Ord for GridCell2 {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
-    }
-}
+ #[derive(PartialEq, Debug)]
+ struct GridCell2 {
+     row: isize,
+     column: isize,
+     priority: f64,
+ }
+ 
+ impl Eq for GridCell2 {}
+ 
+ impl PartialOrd for GridCell2 {
+     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+         other.priority.partial_cmp(&self.priority)
+     }
+ }
+ 
+ impl Ord for GridCell2 {
+     fn cmp(&self, other: &GridCell2) -> Ordering {
+         let ord = self.partial_cmp(other).unwrap();
+         match ord {
+             Ordering::Greater => Ordering::Less,
+             Ordering::Less => Ordering::Greater,
+             Ordering::Equal => ord,
+         }
+     }
+ }
+ 
