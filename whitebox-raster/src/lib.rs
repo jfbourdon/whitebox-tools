@@ -502,6 +502,11 @@ impl Raster {
         self.configs.nodata
     }
 
+    pub fn get_value_unsafe(&self, row: isize, column: isize) -> f64 {
+        let idx = row as usize * self.configs.columns + column as usize;
+        self.data[idx]
+    }
+
     pub fn set_value(&mut self, row: isize, column: isize, value: f64) {
         if column >= 0 && row >= 0 {
             let c: usize = column as usize;
@@ -554,6 +559,12 @@ impl Raster {
                 }
             }
         }
+    }
+
+    pub fn set_row_data_unsafe(&mut self, row: isize, values: Vec<f64>) {
+        let idx_start = row as usize * self.configs.columns;
+        let idx_end = row as usize * self.configs.columns + self.configs.columns;
+        self.data[idx_start..idx_end].copy_from_slice(&values[..]);
     }
 
     pub fn get_row_data(&self, row: isize) -> Vec<f64> {

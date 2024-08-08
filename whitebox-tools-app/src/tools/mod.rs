@@ -509,6 +509,7 @@ impl ToolManager {
         tool_names.push("Viewshed".to_string());
         tool_names.push("VisibilityIndex".to_string());
         tool_names.push("WetnessIndex".to_string());
+        tool_names.push("WetnessIndexBoehnerAndConrad".to_string());
 
         tool_names.sort();
 
@@ -1196,6 +1197,7 @@ impl ToolManager {
             "viewshed" => Some(Box::new(terrain_analysis::Viewshed::new())),
             "visibilityindex" => Some(Box::new(terrain_analysis::VisibilityIndex::new())),
             "wetnessindex" => Some(Box::new(terrain_analysis::WetnessIndex::new())),
+            "wetnessindexboehnerandconrad" => Some(Box::new(terrain_analysis::WetnessIndexBoehnerAndConrad::new())),
 
             _ => None,
         }
