@@ -34,7 +34,7 @@ use std::thread;
 /// raster is of the float data type and continuous data scale.
 ///
 /// See Also
-/// `Slope`, `D8FlowAccumulation`, `DInfFlowAccumulation`, `FD8FlowAccumulation`, `BreachDepressionsLeastCost`
+/// `WetnessIndexBoehnerAndConrad`, `Slope`, `D8FlowAccumulation`, `DInfFlowAccumulation`, `FD8FlowAccumulation`, `BreachDepressionsLeastCost`
 pub struct WetnessIndex {
     name: String,
     description: String,
