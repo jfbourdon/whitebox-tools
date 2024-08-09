@@ -651,41 +651,49 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
     let columns = dem.configs.columns as isize;
     let nodata = dem.configs.nodata;
     let cellsize = dem.configs.resolution_x;
-
-    let (mut slope, mut slope2): (f32, f32);
-    let mut area: f32;
-    let mut z: f64;
+    let num_procs = num_cpus::get() as isize;
 
     let slope_min_rad = slope_min * f32::consts::PI / 180.0;
     let slope_offset_rad = slope_offset * f32::consts::PI / 180.0;
 
-    // Étape se parallélisant bien
-    for row in 0..rows {
-        for col in 0..columns {
-            z = dem.get_value(row, col);
-            if z != nodata {
-                if slope_type == 1 {
-                    // slope_type is "catchment slope"
-                    slope = m_slope.get_value(row, col);
-                } else {
-                    // slope_type is "local slope"
-                    slope = get_gradient(&dem, row, col, z, cellsize);
+    let (tx, rx) = mpsc::channel();
+    for tid in 0..num_procs {
+        let dem = dem.clone();
+        let m_slope = m_slope.clone();
+        let m_amod = m_amod.clone();
+        let tx = tx.clone();
+        thread::spawn(move || {
+            for row in (0..rows).filter(|r| r % num_procs == tid) {
+                let mut vec_twi = vec![nodata; columns as usize];
+                for col in 0..columns {
+                    let z = dem.get_value(row, col);
+                    if z != nodata {
+                        let mut slope = match slope_type {
+                            0_isize => get_gradient(&dem, row, col, z, cellsize), // local slope
+                            1_isize => m_slope.get_value(row, col), // catchment slope
+                            _ => panic!("Invalid 'slope_type' parameter"),
+                        };
+
+                        let slope2 = slope + slope_offset_rad;
+                        slope = if slope2 > slope_min_rad { slope2.atan() } else { slope_min_rad.atan() };
+        
+                        let area = match area_type {
+                            0_isize => m_amod.get_value(row, col), // total catchment area
+                            1_isize => m_amod.get_value(row, col).sqrt(), // square root of catchment area
+                            2_isize => m_amod.get_value(row, col) / cellsize as f32, // specific catchment area
+                            _ => panic!("Invalid 'area_type' parameter"),
+                        };
+        
+                        vec_twi[col as usize] = (area / slope).ln() as f64;
+                    }
                 }
-
-                slope2 = slope + slope_offset_rad;
-                slope = if slope2 > slope_min_rad { slope2.atan() } else { slope_min_rad.atan() };
-                area = m_amod.get_value(row, col); //equivalent to area_type == "total catchment area"
-
-                if area_type == 1isize {
-                    // area_type is "square root of catchment area"
-                    area = area.sqrt(); 
-                } else if area_type == 2isize {
-                    // area_type is "specific catchment area"
-                    area = area / cellsize as f32;
-                }
-
-                twi.set_value(row, col, (area / slope).ln() as f64)
+                tx.send((row, vec_twi)).unwrap();
             }
-        }
+        });
+    }
+
+    for _ in 0..rows {
+        let (row, vec_twi) = rx.recv().expect("Error receiving data from thread.");
+        twi.set_row_data(row, vec_twi);
     }
 }
