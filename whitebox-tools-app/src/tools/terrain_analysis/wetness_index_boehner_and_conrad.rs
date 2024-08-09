@@ -9,7 +9,6 @@ License: MIT
 use whitebox_raster::*;
 use whitebox_common::structures::Array2D;
 use crate::tools::*;
-use std::cmp::Ordering;
 use std::cmp::Ordering::Equal;
 use num_cpus;
 use std::env;
@@ -213,7 +212,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let resx = dem.configs.resolution_x;
         let resy = dem.configs.resolution_y;
         let cellsize = resx;
-        let mut num_procs = num_cpus::get() as isize;
+        let num_procs = num_cpus::get() as isize;
 
         // À mettre en paramètres pour l'utilisateur
         let suction = 10_f32;
@@ -592,6 +591,7 @@ fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mas
 
     let (mut row_n, mut col_n): (isize, isize);
     let nodata_area = 0_f32; // Techniquement, ce n'est pas du nodata, mais ça y correspond. Formater différemment éventuellement.
+    let m_area_nodata = -1_f32;
 
     // Boucle parallélisable car "m_amod" est jamais lu, toujours jsute modifié
     for row in 0..rows {
@@ -654,7 +654,7 @@ fn get_local_maximum<'a>(m_grid: &'a Array2D<f32>, row: isize, col: isize) -> f3
 }
 
 
-fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>, dem: Raster, area_type: isize, slope_type: isize, slope_min: f32, slope_offset: f32) {
+fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>, dem: Arc<Raster>, area_type: isize, slope_type: isize, slope_min: f32, slope_offset: f32) {
     let rows = dem.configs.rows as isize;
     let columns = dem.configs.columns as isize;
     let nodata = dem.configs.nodata;
