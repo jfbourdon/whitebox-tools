@@ -201,7 +201,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         }
 
         if verbose {
-            println!("Reading data...")
+            println!("Reading DEM data...")
         };
         let dem = Arc::new(Raster::new(&dem_file, "r")?);
 
@@ -215,12 +215,13 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let num_procs = num_cpus::get() as isize;
 
         // À mettre en paramètres pour l'utilisateur
-        let suction = 10_f32;
+        let suction_ini = 10_f32;
         let slope_weight = 1_f32;
         let area_type = 0_isize;    // 0 = "total catchment area" | 1 = "square root of catchment area" | 2 = "specific catchment area"
         let slope_type = 1_isize;   // 0 = "local slope" | 1 = "catchment slope"
         let slope_min = 0_f32;      // degrees
         let slope_offset = 0_f32;   // degrees
+        let mfd_converge = 1.1_f64;
         
 
         // Make sure that the DEM has square pixels
@@ -241,21 +242,66 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         // Calcul des accumulations de flux selon MFD
         // DEBUT DE get_area()
         ///////////
-
-
-        let mfd_converge = 1.1_f64;
-
+        println!("Calculate initial slope and suction matrices...");
         let mut m_suction: Array2D<f32> = Array2D::new(rows, columns, 0f32, -1f32)?;
-        let mut m_area: Array2D<f32> = Array2D::new(rows, columns, 0f32, -1f32)?;
         let mut m_slope: Array2D<f32> = Array2D::new(rows, columns, 0f32, -1f32)?;
+        
+        
+        // Calcul de la matrice initiale de pente, de la matrice de suction
+        // ainsi que de l'index d'élévation
+        let (tx, rx) = mpsc::channel();
+        for tid in 0..num_procs {
+            let dem = dem.clone();
+            let tx = tx.clone();
+            thread::spawn(move || {
+                for row in (0..rows).filter(|r| r % num_procs == tid) {
+                    let mut vec_cells = Vec::<(isize, isize, f64)>::with_capacity(columns as usize);
+                    let mut vec_slope = vec![-1f32; columns as usize];
+                    let mut vec_suction = vec![-1f32; columns as usize];
+                    for col in 0..columns {
+                        let z = dem.get_value(row, col);
+                        if z != nodata {
+                            // Calcul de la pente initiale
+                            let slope = get_gradient(&dem, row, col, z, resx);
+                            vec_slope[col as usize] = slope;
+
+                            // Calcul de la suction
+                            let t_param = suction_ini.powf(slope_weight * slope);
+                            vec_suction[col as usize] = (1.0 / t_param).powf(t_param.exp());
+
+                            // Ajout à l'index d'élévation
+                            vec_cells.push((row, col, z));
+
+                        }
+                    }
+                    tx.send((row, vec_slope, vec_suction, vec_cells)).unwrap();
+                }
+            });
+        }
+
+
+        let mut cells_ordered = Vec::<(isize, isize, f64)>::with_capacity((rows * columns) as usize);
+        for _ in 0..rows {
+            let (row, vec_slope, vec_suction, mut vec_cells) = rx.recv().expect("Error receiving data from thread.");
+            m_slope.set_row_data(row, vec_slope);
+            m_suction.set_row_data(row, vec_suction);
+            cells_ordered.append(&mut vec_cells);
+        }
+
+        // In order to pop the values from highest to lowest, we need to sort them from lowest to highest.
+        // To ensure constant ordering from run to run (due to multiprocessing), values are first sorted by row and column
+        cells_ordered.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Equal));
+        cells_ordered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
+        cells_ordered.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(Equal));
+
+
+
+
+
+        // Création de la matrice d'accumulation et de la matrice de poids
+        let mut m_area: Array2D<f32> = Array2D::new(rows, columns, 0f32, -1f32)?;
         let mut m_weight: Array2D<f32> = Array2D::new(rows, columns, 1f32, -1f32)?;
 
-        
-        
-        // Initialisation de matrices de base et
-        // création de l'index d'ordre de traitement
-        println!("Initializing base matrices...");
-        let mut cells = create_index(&dem, num_procs);
 
 
         // Calcul du MFD initial
@@ -285,30 +331,17 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                 ];
 
 
-        while let Some(cell) = cells.pop() {
+        while let Some(cell) = cells_ordered.pop() {
             row = cell.0;
             col = cell.1;
             z = cell.2;
-
-            // Calcul de la pente initiale
-            // Je pourrais sortir de la boucle et en précalculer les valeurs en parallèle
-            // L'ordre de traitement n'a aucun impact ici
-            slope = get_gradient(&dem, row, col, z, cellsize);
-
-            // Calcul de la suction
-            // Je pourrais sortir de la boucle et en précalculer les valeurs en parallèle
-            // L'ordre de traitement n'a aucun impact ici
-            // À intégrer à la parallélisation précédente
-            t_param = suction.powf(slope_weight * slope);            
-            m_suction.set_value(row, col, (1.0 / t_param).powf(t_param.exp()));
-
 
             // Ajustement initial de l'accumulation (non parallélisable à cause de la modification itérative de "m_area" plus loin)
             area = m_area.get_value(row, col) + m_weight.get_value(row, col);
             m_area.set_value(row, col, area);
 
             // Ajustement initial de la pente du catchment en fonction de l'accumulation
-            slope += m_slope.get_value(row, col);  // Ligne que je pourrai retirer une fois la matrice pré-calculée
+            slope = m_slope.get_value(row, col);
             m_slope.set_value(row, col, slope / area);
 
 
@@ -432,62 +465,6 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 }
 
 
-
-
-fn create_index<'a>(dem: &'a Arc<Raster>, num_procs: isize) -> Vec<(isize, isize, f64)> {
-    // Fort certainement overkill à paralléliser
-    // Toutefois, je pourrais intégrer la création de l'index au calcul initial des
-    // matrices de pente et de suction. Ça rendrait le tout plus pertinent!
-    let rows = dem.configs.rows as isize;
-    let columns = dem.configs.columns as isize;
-    let nodata = dem.configs.nodata;
-
-    let (tx, rx) = mpsc::channel();
-    for tid in 0..num_procs {
-        let dem = dem.clone();
-        let tx = tx.clone();
-        thread::spawn(move || {
-            let mut z: f64;
-            for row in (0..rows).filter(|r| r % num_procs == tid) {
-                let mut cells: Vec<(isize, isize, f64)> = vec![];
-                for col in 0..columns {
-                    z = dem.get_value(row, col);
-                    if z != nodata {
-                        cells.push((row, col, z));
-                    }
-                }
-                tx.send(cells).unwrap();
-            }
-        });
-    }
-
-    //let mut cells_ordered: Vec<(isize, isize, f64)> = vec![];
-    let mut cells_ordered = Vec::<(isize, isize, f64)>::with_capacity((rows * columns) as usize);
-    for _ in 0..rows {
-        let mut cells = rx.recv().expect("Error receiving data from thread.");
-        cells_ordered.append(&mut cells);
-    }
-
-
-
-    //let mut z: f64;
-    //for row in 0..rows {
-    //    for col in 0..columns {
-    //        z = dem.get_value(row, col);
-    //        if z != nodata {
-    //            cells.push((row, col, z));
-    //        }
-    //    }
-    //}
-
-    // In order to pop the values from highest to lowest, we need to sort them from lowest to highest.
-    // To ensure constant ordering from run to run (due to multiprocessing), values are first sorted by row and column
-    cells_ordered.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Equal));
-    cells_ordered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
-    cells_ordered.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(Equal));
-
-    return cells_ordered;
-}
 
 
 fn get_gradient<'a>(dem: &'a Raster, row: isize, col: isize, z:f64, cellsize: f64) -> f32 {
