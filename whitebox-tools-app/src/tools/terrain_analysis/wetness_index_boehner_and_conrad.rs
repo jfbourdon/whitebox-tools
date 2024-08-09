@@ -503,6 +503,7 @@ fn get_gradient<'a>(dem: &'a Raster, row: isize, col: isize, z:f64, cellsize: f6
 fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mask: Array2D<i8>) -> Array2D<f32> {
     let rows = m_area_ini.rows as isize;
     let columns = m_area_ini.columns as isize;
+    let num_procs = num_cpus::get() as isize;
 
     let mut masked: i8;  // Est-ce que je pourrais le remplir pour éviter des calculs pour les cellules nodata?
     let (mut area, mut area_mod): (f32, f32);
@@ -566,42 +567,56 @@ fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mas
 
     println!("\npost-processing...");
 
-    let (mut row_n, mut col_n): (isize, isize);
     let nodata_area = 0_f32; // Techniquement, ce n'est pas du nodata, mais ça y correspond. Formater différemment éventuellement.
     let m_area_nodata = -1_f32;
 
-    // Boucle parallélisable car "m_amod" est jamais lu, toujours jsute modifié
-    for row in 0..rows {
-        for col in 0..columns {
-            if m_area_ini.get_value(row, col) != nodata_area {
-                let mut area_modified = false;
-                let mut n = 0isize;
-                let mut z = 0f32;
+    
 
-                for drow in -1..2 {
-                    row_n = row + drow;
-                    for dcol in -1..2 {
-                        col_n = col + dcol;
-                        if m_area_ini.get_value(row_n, col_n) != nodata_area {
-                            area = m_area.get_value(row_n, col_n);
-                            if area > m_area_ini.get_value(row_n, col_n) {
-                                area_modified = true;
+    let (tx, rx) = mpsc::channel();
+    for tid in 0..num_procs {
+        let m_area_ini = m_area_ini.clone();
+        let m_area = m_area.clone();
+        let tx = tx.clone();
+        thread::spawn(move || {
+            for row in (0..rows).filter(|r| r % num_procs == tid) {
+                let mut vec_amod = vec![-1f32; columns as usize];
+                for col in 0..columns {
+                    if m_area_ini.get_value(row, col) != nodata_area {
+                        let mut area_modified = false;
+                        let mut n = 0_isize;
+                        let mut z = 0_f32;
+        
+                        for drow in -1..2 {
+                            let row_n = row + drow;
+                            for dcol in -1..2 {
+                                let col_n = col + dcol;
+                                if m_area_ini.get_value(row_n, col_n) != nodata_area {
+                                    let area = m_area.get_value(row_n, col_n);
+                                    if area > m_area_ini.get_value(row_n, col_n) {
+                                        area_modified = true;
+                                    }
+                                    n += 1;
+                                    z += area;
+                                }
                             }
-                            n += 1;
-                            z += area;
                         }
+                        if area_modified {
+                            vec_amod[col as usize] = z / n as f32;
+                        } else {
+                            vec_amod[col as usize] = m_area.get_value(row, col);
+                        }
+                    } else {
+                        vec_amod[col as usize] = m_area_nodata;
                     }
                 }
-                if area_modified {
-                    m_amod.set_value(row, col, z / n as f32)
-                } else {
-                    m_amod.set_value(row, col, m_area.get_value(row, col))
-                }
-            } else {
-                m_amod.set_value(row, col, m_area_nodata)
+                tx.send((row, vec_amod)).unwrap();
             }
+        });
+    }
 
-        }
+    for _ in 0..rows {
+        let (row, vec_amod) = rx.recv().expect("Error receiving data from thread.");
+        m_amod.set_row_data(row, vec_amod);
     }
 
     return m_amod;
