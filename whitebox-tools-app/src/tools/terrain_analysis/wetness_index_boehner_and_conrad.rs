@@ -308,14 +308,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         // N'est finalement pas parallélisable à cause de la modification
         // itérative de "m_area" et "m_slope"
         println!("Calculate initial MFD...");
-        let mut row: isize;
-        let mut col: isize;
 
-        let mut slope: f32;
-        let mut t_param: f32;
-        let mut area: f32;
-
-        let (mut d, mut z): (f64, f64);
         let dcol = [0, 1, 1, 1, 0, -1, -1, -1];
         let drow = [1, 1, 0, -1, -1, -1, 0, 1];
         let diag_cellsize = (2.0 * cellsize * cellsize).sqrt();
@@ -332,32 +325,32 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
 
         while let Some(cell) = cells_ordered.pop() {
-            row = cell.0;
-            col = cell.1;
-            z = cell.2;
+            let row: isize = cell.0;
+            let col: isize = cell.1;
+            let z: f64 = cell.2;
 
             // Ajustement initial de l'accumulation (non parallélisable à cause de la modification itérative de "m_area" plus loin)
-            area = m_area.get_value(row, col) + m_weight.get_value(row, col);
+            let area = m_area.get_value(row, col) + m_weight.get_value(row, col);
             m_area.set_value(row, col, area);
 
             // Ajustement initial de la pente du catchment en fonction de l'accumulation
-            slope = m_slope.get_value(row, col);
+            let slope = m_slope.get_value(row, col);
             m_slope.set_value(row, col, slope / area);
 
 
             // Ajustement final de l'accumulation et de la pente du catchment
             let mut dz = vec![0_f32; 8];
             let mut dz_sum = 0_f32;
-            let mut row_n: isize;
-            let mut col_n: isize;
-            let mut z_n: f64;
+            //let mut row_n: isize;
+            //let mut col_n: isize;
+            //let mut z_n: f64;
 
             for ii in 0..8 {
-                row_n = row + drow[ii];
-                col_n = col + dcol[ii];
-                z_n = dem.get_value(row_n, col_n);
+                let row_n = row + drow[ii];
+                let col_n = col + dcol[ii];
+                let z_n = dem.get_value(row_n, col_n);
                 if z_n != nodata {
-                    d = z - z_n;
+                    let d = z - z_n;
                     if d > 0.0 {
                         dz[ii] = (d / grid_lengths[ii]).atan().powf(mfd_converge) as f32;
                         dz_sum += dz[ii];
@@ -368,9 +361,9 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
             if dz_sum > 0.0 {
                 for ii in 0..8 {
                     if dz[ii] > 0.0 {
-                        row_n = row + drow[ii];
-                        col_n = col + dcol[ii];
-                        z_n = dem.get_value(row_n, col_n);
+                        let row_n = row + drow[ii];
+                        let col_n = col + dcol[ii];
+                        let z_n = dem.get_value(row_n, col_n);
                         if z_n != nodata {
                             m_area.increment(row_n, col_n, area * dz[ii] / dz_sum);
                             m_slope.increment(row_n, col_n, slope * dz[ii] / dz_sum);
@@ -387,21 +380,12 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let cell_area = (cellsize * cellsize) as f32;
         for row in 0..rows {
             for col in 0..columns {
-                z = dem.get_value(row, col);
+                let z = dem.get_value(row, col);
                 if z != nodata {
                     m_area.set_value(row, col, m_area.get_value(row, col) * cell_area);
                 }
             }
         }
-
-        let mut raster_m_slope = Raster::initialize_using_array2d("Y:/Developpement/Programmation/JFB/Saga_TWI/m_slope.sdat", &dem.configs, m_slope.duplicate());
-        let _ = raster_m_slope.write();
-
-        let mut raster_m_suction = Raster::initialize_using_array2d("Y:/Developpement/Programmation/JFB/Saga_TWI/m_suction.sdat", &dem.configs, m_suction.duplicate());
-        let _ = raster_m_suction.write();
-
-        let mut raster_m_area = Raster::initialize_using_array2d("Y:/Developpement/Programmation/JFB/Saga_TWI/m_area.sdat", &dem.configs, m_area.duplicate());
-        let _ = raster_m_area.write();
 
         // FIN DE get_area()
 
@@ -417,8 +401,6 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         println!("Modify MFD...");
         let m_amod = get_modified(&m_area, m_suction, m_mask);
 
-        let mut raster_m_amod = Raster::initialize_using_array2d("Y:/Developpement/Programmation/JFB/Saga_TWI/m_amod.sdat", &dem.configs, m_amod.duplicate());
-        let _ = raster_m_amod.write();
 
         // Calcul classique du TWI
         println!("Calculate topographic wetness index...");
@@ -505,9 +487,6 @@ fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mas
     let columns = m_area_ini.columns as isize;
     let num_procs = num_cpus::get() as isize;
 
-    let mut masked: i8;  // Est-ce que je pourrais le remplir pour éviter des calculs pour les cellules nodata?
-    let (mut area, mut area_mod): (f32, f32);
-
     let mut m_amod = m_area_ini.duplicate();
     let mut m_area = m_area_ini.duplicate();
 
@@ -518,27 +497,25 @@ fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mas
         iteration += 1;
         nb_changes = 0;
 
-        // Boucle parallélisable... mais pas certain parce que "area_mod" nécessite
-        // les valeurs voisine dans get_local_maximum() et que m_area est à la fois
-        // lu et modifier. À valider dans le code C++. Ultimement, ce n'est peut-être pas
-        // grave s'il y a convergence. À tester comme il faut.
+        // Boucle parallélisable même si "area_mod" nécessite les valeurs voisine dans get_local_maximum()
+        // car il y a ultimement convergence. Ça prend juste quelques itération supplémentaires.
         // Autre chose à tester: intégrer directement ici la fonction get_local_maximum
         // pour voir s'il y a un impact sur la performance (éviterait une déclaration répétitive
-        // de variables, mais le compileur voit peut-être les choses autrement)
+        // de variables, mais le compilateur voit peut-être les choses autrement).
         for row in 0..rows {
             for col in 0..columns {
                 // Un masque permet d'éviter à l'algorithme de perdre son temps dans une zone certaine d'eau (1 == eau, 0 == terre)
                 // Pas nécessairement la meilleure approche, je devrais peut-être plutôt modifier "m_area_ini" en entrée avec le masque
                 // pour y inscrire une valeur élevée d'accumulation sous le masque
-                masked = m_mask.get_value(row, col);
+                // Accessoirement, est-ce que je pourrais remplir le mask avec le nodata au bons endroit pour éviter des calculs dans celles-ci?
+                let masked = m_mask.get_value(row, col);
                 if masked == 0 {
-                    area_mod = m_suction.get_value(row, col) * get_local_maximum(&m_area, row, col);
-                    area = m_area.get_value(row, col);
+                    let area_mod = m_suction.get_value(row, col) * get_local_maximum(&m_area, row, col);
+                    let area = m_area.get_value(row, col);
                     if area_mod > area {
                         nb_changes += 1;
                         m_area.set_value(row, col, area_mod);
                     }
-
                 }
             }
         }
@@ -549,7 +526,7 @@ fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mas
             // Boucle parallélisable
             for row in 0..rows {
                 for col in 0..columns {
-                    area = m_area.get_value(row, col);
+                    let area = m_area.get_value(row, col);
                     if area != m_amod.get_value(row, col) {
                         nb_changes += 1;
                         m_amod.set_value(row, col, area);
@@ -562,15 +539,11 @@ fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mas
         println!("pass {} ({} > 0)", iteration, nb_changes);
     }
 
-    //let mut raster_m_areamod = Raster::initialize_using_array2d("Y:/Developpement/Programmation/JFB/Saga_TWI/m_amod_hatif.sdat", &dem.configs, m_amod.duplicate());
-    //let _ = raster_m_areamod.write();
 
     println!("\npost-processing...");
 
     let nodata_area = 0_f32; // Techniquement, ce n'est pas du nodata, mais ça y correspond. Formater différemment éventuellement.
     let m_area_nodata = -1_f32;
-
-    
 
     let (tx, rx) = mpsc::channel();
     for tid in 0..num_procs {
