@@ -296,7 +296,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
 
         // Création de la matrice d'accumulation et de la matrice de poids
-        let mut m_area: Array2D<f32> = Array2D::new(rows, columns, 0f32, -1f32)?;
+        let mut m_area: Array2D<f32> = Array2D::new(rows, columns, -1f32, -1f32)?;
         let mut m_weight: Array2D<f32> = Array2D::new(rows, columns, 1f32, -1f32)?;
 
 
@@ -327,7 +327,9 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
             let z: f64 = cell.2;
 
             // Ajustement initial de l'accumulation (non parallélisable à cause de la modification itérative de "m_area" plus loin)
-            let area = m_area.get_value_unsafe(row, col) + m_weight.get_value_unsafe(row, col);
+            // L'ajout de 1 est simplement pour contrebalancer les valeurs de départ de m_area qui sont de -1. Considérant que je passe
+            // à travers toutes les cellules valides avec ce while, ça me permet de conserver à -1 uniquement les cellules NoData
+            let area = m_area.get_value_unsafe(row, col) + m_weight.get_value_unsafe(row, col) + 1f32;
             m_area.set_value_unsafe(row, col, area);
 
             // Ajustement initial de la pente du catchment en fonction de l'accumulation
@@ -530,51 +532,43 @@ fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mas
         }
 
 
-        println!("pass {} ({} > 0)", iteration, nb_changes);
+        println!("pass {iteration} ({nb_changes} > 0)");
     }
 
 
     println!("\npost-processing...");
 
-    let nodata_area = 0_f32; // Techniquement, ce n'est pas du nodata, mais ça y correspond. Formater différemment éventuellement.
-    let m_area_nodata = m_area.nodata;
-
     let (tx, rx) = mpsc::channel();
     for tid in 0..num_procs {
         let m_area_ini = m_area_ini.clone();
         let m_area = m_area.clone();
+        let dcol = [0, 1, 1, 1, 0, -1, -1, -1];
+        let drow = [1, 1, 0, -1, -1, -1, 0, 1];
         let tx = tx.clone();
         thread::spawn(move || {
             for row in (0..rows).filter(|r| r % num_procs == tid) {
-                let mut vec_amod = vec![-1f32; columns as usize];
+                let mut vec_amod = m_area.get_row_data_unsafe(row);
                 for col in 0..columns {
-                    if m_area_ini.get_value_unsafe(row, col) != nodata_area {
+                    if m_area_ini.get_value_unsafe(row, col) != m_area.nodata {
                         let mut area_modified = false;
-                        let mut n = 0_isize;
-                        let mut z = 0_f32;
-        
-                        for drow in -1..2 {
-                            let row_n = row + drow;
-                            for dcol in -1..2 {
-                                let col_n = col + dcol;
-                                let area_ini = m_area_ini.get_value(row_n, col_n);
-                                if area_ini != nodata_area {
-                                    let area = m_area.get_value(row_n, col_n);
-                                    if area > area_ini {
-                                        area_modified = true;
-                                    }
-                                    n += 1;
-                                    z += area;
+                        let mut n = 1_isize;
+                        let mut z = vec_amod[col as usize];
+                        for ii in 0..8 {
+                            let row_n = row + drow[ii];
+                            let col_n = col + dcol[ii];
+                            let area_ini = m_area_ini.get_value(row_n, col_n);
+                            if area_ini != m_area.nodata {
+                                let area = m_area.get_value_unsafe(row_n, col_n);
+                                if area > area_ini {
+                                    area_modified = true;
                                 }
+                                n += 1;
+                                z += area;
                             }
                         }
                         if area_modified {
                             vec_amod[col as usize] = z / n as f32;
-                        } else {
-                            vec_amod[col as usize] = m_area.get_value_unsafe(row, col);
                         }
-                    } else {
-                        vec_amod[col as usize] = m_area_nodata;
                     }
                 }
                 tx.send((row, vec_amod)).unwrap();
