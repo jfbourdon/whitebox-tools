@@ -74,6 +74,10 @@ where
         }
     }
 
+    pub fn set_value_unsafe(&mut self, row: isize, column: isize, value: T) {
+        self.data[(row * self.columns + column) as usize] = value;
+    }
+
     pub fn get_value(&self, row: isize, column: isize) -> T {
         if row < 0 || column < 0 {
             return self.nodata;
@@ -88,12 +92,20 @@ where
         // };
     }
 
+    pub fn get_value_unsafe(&self, row: isize, column: isize) -> T {
+        self.data[(row * self.columns + column) as usize]
+    }
+
     pub fn increment(&mut self, row: isize, column: isize, value: T) {
         if column >= 0 && row >= 0 {
             if column < self.columns && row < self.rows {
                 self.data[(row * self.columns + column) as usize] += value;
             }
         }
+    }
+
+    pub fn increment_unsafe(&mut self, row: isize, column: isize, value: T) {
+        self.data[(row * self.columns + column) as usize] += value;
     }
 
     pub fn decrement(&mut self, row: isize, column: isize, value: T) {
@@ -114,6 +126,12 @@ where
         }
     }
 
+    pub fn set_row_data_unsafe(&mut self, row: isize, values: Vec<T>) {
+        let idx_start = (row * self.columns) as usize;
+        let idx_end = (row * self.columns + self.columns) as usize;
+        self.data[idx_start..idx_end].copy_from_slice(&values[..]);
+    }
+
     pub fn get_row_data(&self, row: isize) -> Vec<T> {
         let columns = self.columns as usize;
         let mut values: Vec<T> = vec![self.nodata; columns];
@@ -123,6 +141,14 @@ where
             }
         }
         values
+    }
+
+    pub fn get_row_data_unsafe(&self, row: isize) -> Vec<T> {
+        let idx_start = (row * self.columns) as usize;
+        let idx_end = (row * self.columns + self.columns) as usize;
+        self.data[idx_start..idx_end].to_vec()
+        //let values: Vec<T> = self.data[idx_start..idx_end].to_vec();
+        //values
     }
 
     /// Increments an entire row of data at one time.
