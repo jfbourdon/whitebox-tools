@@ -395,7 +395,13 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let nodata = dem.configs.nodata;
         let resx = dem.configs.resolution_x;
         let resy = dem.configs.resolution_y;
-        let num_procs = num_cpus::get() as isize;
+
+        let mut num_procs = num_cpus::get() as isize;
+        let configs = whitebox_common::configs::get_configs()?;
+        let max_procs = configs.max_procs;
+        if max_procs > 0 && max_procs < num_procs {
+            num_procs = max_procs;
+        }
         
 
         let mut m_weights = Array2D::new(rows, columns, 1f32, -1f32)?;
