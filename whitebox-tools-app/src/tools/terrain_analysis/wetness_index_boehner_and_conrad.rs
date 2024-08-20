@@ -21,26 +21,37 @@ use std::sync::Arc;
 use std::thread;
 
 
-/// This tool can be used to calculate the topographic wetness index, commonly used in the TOPMODEL rainfall-runoff framework.
-/// The index describes the propensity for a site to be saturated to the surface given its contributing area and local slope
+/// This tool can be used to calculate the topographic wetness index commonly used in the TOPMODEL rainfall-runoff framework.
+/// The index describes the propensity for a site to be saturated to the surface given its contributing area and slope
 /// characteristics. It is calculated as:
 ///
-/// > WI = Ln(As / tan(Slope))
+/// > WI = Ln(Area / tan(Slope))
 ///
-/// Where `As` is the specific catchment area (i.e. the upslope contributing area per unit contour length) estimated using one of
-/// the available flow accumulation algorithms in the Hydrological Analysis toolbox. Notice that `As` must not be log-transformed
-/// prior to being used; log-transformation of `As` is a common practice when visualizing the data. The slope image should be
-/// measured in degrees and can be created from the base digital elevation model (DEM) using the `Slope` tool. Grid cells with a
-/// slope of zero will be assigned **NoData** in the output image to compensate for the fact that division by zero is infinity.
-/// These very flat sites likely coincide with the wettest parts of the landscape. The input images must have the same grid dimensions.
+/// Where `Area` is the catchment area (i.e. the upslope contributing area) estimated using a multiple-flow-direction
+/// accumulation algorithm. The initial catchment area values are however modified iteratively according to the highest
+/// contributing area of the neighbouring cells weighted by their slope. This iterative process better predicts potential
+/// saturation for cells situated in valley floors with a small vertical distance to a channel compared to the standard
+/// TWI calculation from `WetnessIndex` at the cost of longer computing times.
 ///
-/// Grid cells possessing the NoData value in either of the input images are assigned NoData value in the output image. The output
-/// raster is of the float data type and continuous data scale.
+/// The DEM must have been hydrologically corrected to remove all spurious depressions and flat areas. DEM pre-processing
+/// is usually achieved using either the `BreachDepressions` (also `BreachDepressionsLeastCost`) or `FillDepressions` tool.
+/// The output raster is of the float data type and continuous data scale.
 /// 
-/// Derived from the C++ implementation by Olaf Conrad for SAGA GIS 
+/// Derived from the C++ implementation of the *SAGA Wetness Index* tool by Olaf Conrad in SAGA GIS.
 ///
+/// # References
+/// Boehner, J., Koethe, R. Conrad, O., Gross, J., Ringeler, A., & Selige, T. 2002.
+/// *Soil Regionalisation by Means of Terrain Analysis and Process Parameterisation.*
+/// In: Micheli, E., Nachtergaele, F., Montanarella, L. [Ed.]: Soil Classification 2001.
+/// European Soil Bureau, Research Report No. 7, EUR 20398 EN, Luxembourg: 213-222.
+/// 
+/// Boehner, J., & Selige, T. 2006. *Spatial prediction of soil attributes using terrain
+/// analysis and climate regionalisation.* In: Boehner, J., McCloy, K.R., Strobl, J.
+/// [Eds.]: SAGA - Analysis and Modelling Applications, Goettinger Geographische Abhandlungen,
+/// Goettingen: 13-28.
+/// 
 /// See Also
-/// `Slope`, `D8FlowAccumulation`, `DInfFlowAccumulation`, `FD8FlowAccumulation`, `BreachDepressionsLeastCost`, `WetnessIndex`
+/// `WetnessIndex`, `BreachDepressionsLeastCost`, `FillDepressions`
 pub struct WetnessIndexBoehnerAndConrad {
     name: String,
     description: String,
@@ -65,6 +76,78 @@ impl WetnessIndexBoehnerAndConrad {
             parameter_type: ParameterType::ExistingFile(ParameterFileType::Raster),
             default_value: None,
             optional: false,
+        });
+
+        parameters.push(ToolParameter {
+            name: "Weights File".to_owned(),
+            flags: vec!["--weights".to_owned()], 
+            description: "Weights raster file.".to_owned(),
+            parameter_type: ParameterType::ExistingFile(ParameterFileType::Raster),
+            default_value: None,
+            optional: true,
+        });
+
+        parameters.push(ToolParameter{
+            name: "Area Type".to_owned(), 
+            flags: vec!["--area_type".to_owned()], 
+            description: "Area type; one of 'total catchement area', 'square root of catchment area', or 'specific catchment area (default)'.".to_owned(),
+            parameter_type: ParameterType::OptionList(vec!["total catchement area".to_owned(), "square root of catchment area".to_owned(), "specific catchment area".to_owned()]),
+            default_value: Some("specific catchement area".to_owned()),
+            optional: true
+        });
+
+        parameters.push(ToolParameter{
+            name: "Slope Type".to_owned(), 
+            flags: vec!["--slope_type".to_owned()], 
+            description: "Slope type; one of 'local slope' or 'catchment slope (default)'.".to_owned(),
+            parameter_type: ParameterType::OptionList(vec!["local slope".to_owned(), "catchment slope".to_owned()]),
+            default_value: Some("catchment slope".to_owned()),
+            optional: true
+        });
+
+        parameters.push(ToolParameter {
+            name: "Suction".to_owned(),
+            flags: vec!["--suction".to_owned()],
+            description: "Optional suction factor (default is 10.0).".to_owned(),
+            parameter_type: ParameterType::Float,
+            default_value: Some("10".to_owned()),
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
+            name: "Slope weight".to_owned(),
+            flags: vec!["--slope_weight".to_owned()],
+            description: "Optional slope weight for index calculation (default is 1.0).".to_owned(),
+            parameter_type: ParameterType::Float,
+            default_value: Some("1".to_owned()),
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
+            name: "Minimum slope (in degrees)".to_owned(),
+            flags: vec!["--slope_min".to_owned()],
+            description: "Optional minimum slope for index calculation (default is 0.0).".to_owned(),
+            parameter_type: ParameterType::Float,
+            default_value: Some("0".to_owned()),
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
+            name: "Slope offset (in degrees)".to_owned(),
+            flags: vec!["--slope_offset".to_owned()],
+            description: "Optional slope offset for index calculation (default is 0.0).".to_owned(),
+            parameter_type: ParameterType::Float,
+            default_value: Some("0".to_owned()),
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
+            name: "MFD convergence".to_owned(),
+            flags: vec!["--mfd_convergence".to_owned()],
+            description: "Optional MFD convergence parameter (default is 1.1).".to_owned(),
+            parameter_type: ParameterType::Float,
+            default_value: Some("1.1".to_owned()),
+            optional: true,
         });
 
         parameters.push(ToolParameter {
@@ -143,7 +226,16 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         verbose: bool,
     ) -> Result<(), Error> {
         let mut dem_file = String::new();
+        let mut weights_file = String::new();
         let mut output_file = String::new();
+        let mut suction_weight = 10_f32;
+        let mut slope_weight = 1_f32;
+        let mut area_type = 2_isize;
+        let mut slope_type = 1_isize;
+        let mut slope_min = 0_f32;
+        let mut slope_offset = 0_f32;
+        let mut mfd_convergence = 1.1_f64;
+
 
         if args.len() == 0 {
             return Err(Error::new(
@@ -160,20 +252,114 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
             if vec.len() > 1 {
                 keyval = true;
             }
+            let flag_val = vec[0].to_lowercase().replace("--", "-");
 
+            if flag_val == "-i" || flag_val == "-input" || flag_val == "-dem" {
+                dem_file = if keyval {
+                    vec[1].to_string()
+                } else {
+                    args[i + 1].to_string()
+                };
+            
+            } else if flag_val == "-weights" {
+                weights_file = if keyval {
+                    vec[1].to_string()
+                } else {
+                    args[i + 1].to_string()
+                }
 
-            if vec[0].to_lowercase() == "-dem" || vec[0].to_lowercase() == "--dem" || vec[0].to_lowercase() == "-i"|| vec[0].to_lowercase() == "--input" {
-                if keyval {
-                    dem_file = vec[1].to_string();
+            } else if flag_val == "-o" || flag_val == "-output" {
+                output_file = if keyval {
+                    vec[1].to_string()
                 } else {
-                    dem_file = args[i + 1].to_string();
+                    args[i + 1].to_string()
                 }
-            } else if vec[0].to_lowercase() == "-o" || vec[0].to_lowercase() == "--output" {
-                if keyval {
-                    output_file = vec[1].to_string();
+
+            } else if flag_val == "-area_type" {
+                let area_type_flag = if keyval {
+                    vec[1].to_lowercase()
                 } else {
-                    output_file = args[i + 1].to_string();
+                    args[i + 1].to_lowercase()
+                };
+                area_type = match area_type_flag.as_str() {
+                    "total catchement area" => 0_isize,
+                    "square root of catchment area" => 1_isize,
+                    "specific catchment area" => 2_isize,
+                    _ => panic!("Invalid 'area_type' parameter"),
+                };
+
+            } else if flag_val == "-slope_type" {
+                let slope_type_flag = if keyval {
+                    vec[1].to_lowercase()
+                } else {
+                    args[i + 1].to_lowercase()
+                };
+                slope_type = match slope_type_flag.as_str() {
+                    "local slope" => 0_isize,
+                    "catchment slope" => 1_isize,
+                    _ => panic!("Invalid 'slope_type' parameter"),
+                };
+
+            } else if flag_val == "-suction" {
+                suction_weight = if keyval {
+                    vec[1]
+                        .to_string()
+                        .parse::<f32>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                } else {
+                    args[i + 1]
+                        .to_string()
+                        .parse::<f32>()
+                        .expect(&format!("Error parsing {}", flag_val))
                 }
+            } else if flag_val == "-slope_weight" {
+                slope_weight = if keyval {
+                    vec[1]
+                        .to_string()
+                        .parse::<f32>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                } else {
+                    args[i + 1]
+                        .to_string()
+                        .parse::<f32>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                }
+            } else if flag_val == "-slope_min" {
+                slope_min = if keyval {
+                    vec[1]
+                        .to_string()
+                        .parse::<f32>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                } else {
+                    args[i + 1]
+                        .to_string()
+                        .parse::<f32>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                }
+            } else if flag_val == "-slope_offset" {
+                slope_offset = if keyval {
+                    vec[1]
+                        .to_string()
+                        .parse::<f32>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                } else {
+                    args[i + 1]
+                        .to_string()
+                        .parse::<f32>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                }
+            } else if flag_val == "-mfd_convergence" {
+                mfd_convergence = if keyval {
+                    vec[1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                } else {
+                    args[i + 1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                };
             }
         }
 
@@ -190,11 +376,12 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
         let sep: String = path::MAIN_SEPARATOR.to_string();
 
-        if !output_file.contains(&sep) && !output_file.contains("/") {
-            output_file = format!("{}{}", working_directory, output_file);
-        }
         if !dem_file.contains(&sep) && !dem_file.contains("/") {
             dem_file = format!("{}{}", working_directory, dem_file);
+        }
+
+        if !output_file.contains(&sep) && !output_file.contains("/") {
+            output_file = format!("{}{}", working_directory, output_file);
         }
 
         if verbose {
@@ -210,16 +397,24 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let resy = dem.configs.resolution_y;
         let cellsize = resx;
         let num_procs = num_cpus::get() as isize;
-
-        // À mettre en paramètres pour l'utilisateur
-        let suction_ini = 10_f32;
-        let slope_weight = 1_f32;
-        let area_type = 0_isize;    // 0 = "total catchment area" | 1 = "square root of catchment area" | 2 = "specific catchment area"
-        let slope_type = 1_isize;   // 0 = "local slope" | 1 = "catchment slope"
-        let slope_min = 0_f32;      // degrees
-        let slope_offset = 0_f32;   // degrees
-        let mfd_converge = 1.1_f64;
         
+
+        let mut m_weights = Array2D::new(rows, columns, 1f32, -1f32)?;
+        if !weights_file.is_empty() { 
+            if verbose {
+                println!("Reading weights data...")
+            };
+            if !weights_file.contains(&sep) && !weights_file.contains("/") {
+                weights_file = format!("{}{}", working_directory, weights_file);
+            }
+            let r = Raster::new(&weights_file, "r")?;
+            if r.configs.rows != rows as usize || r.configs.columns != columns as usize {
+                return Err(Error::new(ErrorKind::InvalidInput,
+                                    "The input files must have the same number of rows and columns and spatial extent."));
+            }
+            m_weights = r.get_data_as_f32_array2d();
+        }
+
 
         // Make sure that the DEM has square pixels
         // À modifier éventuellement pour permettre des pixels rectangulaires, je dois
@@ -263,7 +458,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                             vec_slope[col as usize] = slope;
 
                             // Calcul de la suction
-                            let t_param = suction_ini.powf(slope_weight * slope);
+                            let t_param = suction_weight.powf(slope_weight * slope);
                             vec_suction[col as usize] = (1.0 / t_param).powf(t_param.exp());
 
                             // Ajout à l'index d'élévation
@@ -293,11 +488,14 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
 
 
+        // Création du masque de non traitement
+        // Pour l'instant je traite partout (aucun masque), mais je devrai ajouter la possibilité d'importation
+        // d'une telle matrice... dans le fond
+        let mut m_mask: Array2D<i8> = Array2D::new(rows, columns, 0i8, -1i8)?;
 
 
         // Création de la matrice d'accumulation et de la matrice de poids
         let mut m_area: Array2D<f32> = Array2D::new(rows, columns, -1f32, -1f32)?;
-        let mut m_weight: Array2D<f32> = Array2D::new(rows, columns, 1f32, -1f32)?;
 
 
 
@@ -329,7 +527,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
             // Ajustement initial de l'accumulation (non parallélisable à cause de la modification itérative de "m_area" plus loin)
             // L'ajout de 1 est simplement pour contrebalancer les valeurs de départ de m_area qui sont de -1. Considérant que je passe
             // à travers toutes les cellules valides avec ce while, ça me permet de conserver à -1 uniquement les cellules NoData
-            let area = m_area.get_value_unsafe(row, col) + m_weight.get_value_unsafe(row, col) + 1f32;
+            let area = m_area.get_value_unsafe(row, col) + m_weights.get_value_unsafe(row, col) + 1f32;
             m_area.set_value_unsafe(row, col, area);
 
             // Ajustement initial de la pente du catchment en fonction de l'accumulation
@@ -348,7 +546,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                 if z_n != nodata {
                     let d = z - z_n;
                     if d > 0.0 {
-                        dz[ii] = (d / grid_lengths[ii]).atan().powf(mfd_converge) as f32;
+                        dz[ii] = (d / grid_lengths[ii]).atan().powf(mfd_convergence) as f32;
                         dz_sum += dz[ii];
                     }
                 }
@@ -388,9 +586,8 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
 
 
-        // Création du masque de non traitement et ajustement des valeurs d'accumulation en
+        // Ajustement des valeurs d'accumulation en
         // fonction de la couche d'accumulation utilisateur
-        let mut m_mask: Array2D<i8> = Array2D::new(rows, columns, 0i8, -1i8)?; // Pour l'instant je traite partout (aucun masque)
 
 
         // Calcul itératif de l'accumulation de flux modifiée
