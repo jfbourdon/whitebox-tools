@@ -395,7 +395,6 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let nodata = dem.configs.nodata;
         let resx = dem.configs.resolution_x;
         let resy = dem.configs.resolution_y;
-        let cellsize = resx;
         let num_procs = num_cpus::get() as isize;
         
 
@@ -414,19 +413,6 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
             }
             m_weights = r.get_data_as_f32_array2d();
         }
-
-
-        // Make sure that the DEM has square pixels
-        // À modifier éventuellement pour permettre des pixels rectangulaires, je dois
-        // juste m'assurer de ne pas me tromper d'où mettre resx et resy
-        if resx != resy {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "The input DEM must have square pixels.",
-            ));
-        }
-
-
 
 
 
@@ -497,17 +483,8 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let mut m_area: Array2D<f32> = Array2D::new(rows, columns, -1f32, -1f32)?;
         let dcol = [0, 1, 1, 1, 0, -1, -1, -1];
         let drow = [1, 1, 0, -1, -1, -1, 0, 1];
-        let diag_cellsize = (2.0 * cellsize * cellsize).sqrt();
-        let grid_lengths = [
-                    cellsize,
-                    diag_cellsize,
-                    cellsize,
-                    diag_cellsize,
-                    cellsize,
-                    diag_cellsize,
-                    cellsize,
-                    diag_cellsize,
-                ];
+        let diagres = (resx * resx + resy * resy).sqrt();
+        let grid_lengths = [resy, diagres, resx, diagres, resy, diagres, resx, diagres];
 
 
         while let Some(cell) = cells_ordered.pop() {
@@ -562,7 +539,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         // Ajustement de l'accumulation en fonction de la taille de cellule
         // Pas pertinent à paralléliser, il risque d'y avoir utimement plus de visites
         // de cellules
-        let cell_area = (cellsize * cellsize) as f32;
+        let cell_area = (resx * resy) as f32;
         for row in 0..rows {
             for col in 0..columns {
                 let z = dem.get_value_unsafe(row, col);
@@ -797,7 +774,7 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
     let rows = dem.configs.rows as isize;
     let columns = dem.configs.columns as isize;
     let nodata = dem.configs.nodata;
-    let cellsize = dem.configs.resolution_x;
+    let cellsize = dem.configs.resolution_x * dem.configs.resolution_y;
     let num_procs = num_cpus::get() as isize;
 
     let slope_min_rad = slope_min.to_radians();
