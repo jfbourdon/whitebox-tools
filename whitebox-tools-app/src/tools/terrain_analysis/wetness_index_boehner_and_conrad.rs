@@ -90,9 +90,9 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter{
             name: "Area Type".to_owned(), 
             flags: vec!["--area_type".to_owned()], 
-            description: "Area type; one of 'total catchement area', 'square root of catchment area', or 'specific catchment area (default)'.".to_owned(),
-            parameter_type: ParameterType::OptionList(vec!["total catchement area".to_owned(), "square root of catchment area".to_owned(), "specific catchment area".to_owned()]),
-            default_value: Some("specific catchement area".to_owned()),
+            description: "Area type; one of 'total catchment area', 'square root of catchment area', or 'specific catchment area (default)'.".to_owned(),
+            parameter_type: ParameterType::OptionList(vec!["total catchment area".to_owned(), "square root of catchment area".to_owned(), "specific catchment area".to_owned()]),
+            default_value: Some("specific catchment area".to_owned()),
             optional: true
         });
 
@@ -282,9 +282,9 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                     args[i + 1].to_lowercase()
                 };
                 area_type = match area_type_flag.as_str() {
-                    "total catchement area" => 0_isize,
-                    "square root of catchment area" => 1_isize,
-                    "specific catchment area" => 2_isize,
+                    "total" => 0_isize, // total catchment area
+                    "square" => 1_isize, // square root of catchment area
+                    "specific" => 2_isize, // specific catchment area
                     _ => panic!("Invalid 'area_type' parameter"),
                 };
 
@@ -295,8 +295,8 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                     args[i + 1].to_lowercase()
                 };
                 slope_type = match slope_type_flag.as_str() {
-                    "local slope" => 0_isize,
-                    "catchment slope" => 1_isize,
+                    "local" => 0_isize, // local slope
+                    "catchment" => 1_isize, // catchment slope
                     _ => panic!("Invalid 'slope_type' parameter"),
                 };
 
@@ -312,6 +312,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         .parse::<f32>()
                         .expect(&format!("Error parsing {}", flag_val))
                 }
+
             } else if flag_val == "-slope_weight" {
                 slope_weight = if keyval {
                     vec[1]
@@ -324,6 +325,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         .parse::<f32>()
                         .expect(&format!("Error parsing {}", flag_val))
                 }
+
             } else if flag_val == "-slope_min" {
                 slope_min = if keyval {
                     vec[1]
@@ -336,6 +338,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         .parse::<f32>()
                         .expect(&format!("Error parsing {}", flag_val))
                 }
+
             } else if flag_val == "-slope_offset" {
                 slope_offset = if keyval {
                     vec[1]
@@ -348,6 +351,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         .parse::<f32>()
                         .expect(&format!("Error parsing {}", flag_val))
                 }
+
             } else if flag_val == "-mfd_convergence" {
                 mfd_convergence = if keyval {
                     vec[1]
