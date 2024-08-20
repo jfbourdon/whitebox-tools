@@ -380,6 +380,9 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
         let sep: String = path::MAIN_SEPARATOR.to_string();
 
+        let mut progress: usize;
+        let mut old_progress: usize = 1;
+
         if !dem_file.contains(&sep) && !dem_file.contains("/") {
             dem_file = format!("{}{}", working_directory, dem_file);
         }
@@ -430,11 +433,10 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         // Calcul des accumulations de flux selon MFD
         // DEBUT DE get_area()
         ///////////
-        println!("Calculate initial slope and suction matrices...");
-        let mut m_suction: Array2D<f32> = Array2D::new(rows, columns, 0f32, -1f32)?;
-        let mut m_slope: Array2D<f32> = Array2D::new(rows, columns, 0f32, -1f32)?;
-        
-        
+        if verbose {
+            println!("Calculate initial slope and suction matrices...")
+        };
+
         // Calcul de la matrice initiale de pente, de la matrice de suction
         // ainsi que de l'index d'élévation
         let (tx, rx) = mpsc::channel();
@@ -467,7 +469,8 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
             });
         }
 
-
+        let mut m_suction: Array2D<f32> = Array2D::new(rows, columns, 0f32, -1f32)?;
+        let mut m_slope: Array2D<f32> = Array2D::new(rows, columns, 0f32, -1f32)?;
         let mut cells_ordered = Vec::<(isize, isize, f64)>::with_capacity((rows * columns) as usize);
         for _ in 0..rows {
             let (row, vec_slope, vec_suction, mut vec_cells) = rx.recv().expect("Error receiving data from thread.");
@@ -478,6 +481,9 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
         // In order to pop the values from highest to lowest, we need to sort them from lowest to highest.
         // To ensure constant ordering from run to run (due to multiprocessing), values are first sorted by row and column
+        if verbose {
+            println!("Sorting cells...")
+        };
         cells_ordered.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Equal));
         cells_ordered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
         cells_ordered.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(Equal));
@@ -495,6 +501,9 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let drow = [1, 1, 0, -1, -1, -1, 0, 1];
         let diagres = (resx * resx + resy * resy).sqrt();
         let grid_lengths = [resy, diagres, resx, diagres, resy, diagres, resx, diagres];
+
+        let nb_cells = cells_ordered.len();
+        let mut ii = 0_usize;
 
 
         while let Some(cell) = cells_ordered.pop() {
@@ -543,12 +552,27 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                     }
                 }
             }
+
+
+            if verbose {
+                ii += 1;
+                progress = (100.0_f64 * ii as f64 / (nb_cells - 1) as f64) as usize;
+                if progress != old_progress {
+                    println!("Initial MFD: {}%", progress);
+                    old_progress = progress;
+                }
+            }
+
+
         }
 
 
         // Ajustement de l'accumulation en fonction de la taille de cellule
         // Pas pertinent à paralléliser, il risque d'y avoir utimement plus de visites
         // de cellules
+        if verbose {
+            println!("Adjust MFD to cell area...")
+        };
         let cell_area = (resx * resy) as f32;
         for row in 0..rows {
             for col in 0..columns {
