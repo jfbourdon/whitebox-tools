@@ -135,9 +135,9 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter {
             name: "Slope offset (in degrees)".to_owned(),
             flags: vec!["--slope_offset".to_owned()],
-            description: "Optional slope offset for index calculation (default is 0.0).".to_owned(),
+            description: "Optional slope offset for index calculation (default is 0.1).".to_owned(),
             parameter_type: ParameterType::Float,
-            default_value: Some("0".to_owned()),
+            default_value: Some("0.1".to_owned()),
             optional: true,
         });
 
@@ -233,7 +233,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let mut area_type = 2_isize;
         let mut slope_type = 1_isize;
         let mut slope_min = 0_f32;
-        let mut slope_offset = 0_f32;
+        let mut slope_offset = 0.1_f32;
         let mut mfd_convergence = 1.1_f64;
 
 
@@ -704,7 +704,7 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
     }
 
 
-    println!("\npost-processing...");
+    println!("post-processing...");
 
     let (tx, rx) = mpsc::channel();
     for tid in 0..num_procs {
