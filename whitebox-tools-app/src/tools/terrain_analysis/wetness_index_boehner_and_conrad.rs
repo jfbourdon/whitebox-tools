@@ -443,7 +443,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                     let mut vec_slope = vec![-1f32; columns as usize];
                     let mut vec_suction = vec![-1f32; columns as usize];
                     for col in 0..columns {
-                        let z = dem.get_value_unsafe(row, col);
+                        let z = dem.get_value(row, col);
                         if z != nodata {
                             // Calcul de la pente initiale
                             let slope = get_gradient(&dem, row, col, z, resx);
@@ -467,8 +467,8 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let mut cells_ordered = Vec::<(isize, isize, f64)>::with_capacity((rows * columns) as usize);
         for _ in 0..rows {
             let (row, vec_slope, vec_suction, mut vec_cells) = rx.recv().expect("Error receiving data from thread.");
-            m_slope.set_row_data_unsafe(row, vec_slope);
-            m_suction.set_row_data_unsafe(row, vec_suction);
+            m_slope.set_row_data(row, vec_slope);
+            m_suction.set_row_data(row, vec_suction);
             cells_ordered.append(&mut vec_cells);
         }
 
@@ -501,12 +501,12 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
             // Ajustement initial de l'accumulation (non parallélisable à cause de la modification itérative de "m_area" plus loin)
             // L'ajout de 1 est simplement pour contrebalancer les valeurs de départ de m_area qui sont de -1. Considérant que je passe
             // à travers toutes les cellules valides avec ce while, ça me permet de conserver à -1 uniquement les cellules NoData
-            let area = m_area.get_value_unsafe(row, col) + m_weights.get_value_unsafe(row, col) + 1f32;
-            m_area.set_value_unsafe(row, col, area);
+            let area = m_area.get_value(row, col) + m_weights.get_value(row, col) + 1f32;
+            m_area.set_value(row, col, area);
 
             // Ajustement initial de la pente du catchment en fonction de l'accumulation
-            let slope = m_slope.get_value_unsafe(row, col);
-            m_slope.set_value_unsafe(row, col, slope / area);
+            let slope = m_slope.get_value(row, col);
+            m_slope.set_value(row, col, slope / area);
 
 
             // Ajustement final de l'accumulation et de la pente du catchment
@@ -533,8 +533,8 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         let col_n = col + dcol[ii];
                         let z_n = dem.get_value(row_n, col_n);
                         if z_n != nodata {
-                            m_area.increment_unsafe(row_n, col_n, area * dz[ii] / dz_sum);
-                            m_slope.increment_unsafe(row_n, col_n, slope * dz[ii] / dz_sum);
+                            m_area.increment(row_n, col_n, area * dz[ii] / dz_sum);
+                            m_slope.increment(row_n, col_n, slope * dz[ii] / dz_sum);
                         }
                     }
                 }
@@ -548,9 +548,9 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let cell_area = (resx * resy) as f32;
         for row in 0..rows {
             for col in 0..columns {
-                let z = dem.get_value_unsafe(row, col);
+                let z = dem.get_value(row, col);
                 if z != nodata {
-                    m_area.set_value_unsafe(row, col, m_area.get_value_unsafe(row, col) * cell_area);
+                    m_area.set_value(row, col, m_area.get_value(row, col) * cell_area);
                 }
             }
         }
@@ -675,11 +675,11 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
         // de variables, mais le compilateur voit peut-être les choses autrement).
         for row in 0..rows {
             for col in 0..columns {
-                let area_mod = m_suction.get_value_unsafe(row, col) * get_local_maximum(&m_area, row, col);
-                let area = m_area.get_value_unsafe(row, col);
+                let area_mod = m_suction.get_value(row, col) * get_local_maximum(&m_area, row, col);
+                let area = m_area.get_value(row, col);
                 if area_mod > area {
                     nb_changes += 1;
-                    m_area.set_value_unsafe(row, col, area_mod);
+                    m_area.set_value(row, col, area_mod);
                 }
             }
         }
@@ -690,10 +690,10 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
             // Boucle parallélisable
             for row in 0..rows {
                 for col in 0..columns {
-                    let area = m_area.get_value_unsafe(row, col);
-                    if area != m_amod.get_value_unsafe(row, col) {
+                    let area = m_area.get_value(row, col);
+                    if area != m_amod.get_value(row, col) {
                         nb_changes += 1;
-                        m_amod.set_value_unsafe(row, col, area);
+                        m_amod.set_value(row, col, area);
                     }
                 }
             }
@@ -715,9 +715,9 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
         let tx = tx.clone();
         thread::spawn(move || {
             for row in (0..rows).filter(|r| r % num_procs == tid) {
-                let mut vec_amod = m_area.get_row_data_unsafe(row);
+                let mut vec_amod = m_area.get_row_data(row);
                 for col in 0..columns {
-                    if m_area_ini.get_value_unsafe(row, col) != m_area.nodata {
+                    if m_area_ini.get_value(row, col) != m_area.nodata {
                         let mut area_modified = false;
                         let mut n = 1_isize;
                         let mut z = vec_amod[col as usize];
@@ -726,7 +726,7 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
                             let col_n = col + dcol[ii];
                             let area_ini = m_area_ini.get_value(row_n, col_n);
                             if area_ini != m_area.nodata {
-                                let area = m_area.get_value_unsafe(row_n, col_n);
+                                let area = m_area.get_value(row_n, col_n);
                                 if area > area_ini {
                                     area_modified = true;
                                 }
@@ -746,7 +746,7 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
 
     for _ in 0..rows {
         let (row, vec_amod) = rx.recv().expect("Error receiving data from thread.");
-        m_amod.set_row_data_unsafe(row, vec_amod);
+        m_amod.set_row_data(row, vec_amod);
     }
 
     return m_amod;
@@ -760,7 +760,7 @@ fn get_local_maximum<'a>(m_grid: &'a Array2D<f32>, row: isize, col: isize) -> f3
     let (mut row_n, mut col_n): (isize, isize);
     let mut z_n: f32;
 
-    let mut val_max = m_grid.get_value_unsafe(row, col);
+    let mut val_max = m_grid.get_value(row, col);
 
     for ii in 0..8 {
         row_n = row + drow[ii];
@@ -796,11 +796,11 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
             for row in (0..rows).filter(|r| r % num_procs == tid) {
                 let mut vec_twi = vec![nodata; columns as usize];
                 for col in 0..columns {
-                    let z = dem.get_value_unsafe(row, col);
+                    let z = dem.get_value(row, col);
                     if z != nodata {
                         let mut slope = match slope_type {
                             0_isize => get_gradient(&dem, row, col, z, cellsize), // local slope
-                            1_isize => m_slope.get_value_unsafe(row, col), // catchment slope
+                            1_isize => m_slope.get_value(row, col), // catchment slope
                             _ => panic!("Invalid 'slope_type' parameter"),
                         };
 
@@ -808,9 +808,9 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
                         slope = if slope2 > slope_min_rad { slope2.atan() } else { slope_min_rad.atan() };
         
                         let area = match area_type {
-                            0_isize => m_amod.get_value_unsafe(row, col), // total catchment area
-                            1_isize => m_amod.get_value_unsafe(row, col).sqrt(), // square root of catchment area
-                            2_isize => m_amod.get_value_unsafe(row, col) / cellsize as f32, // specific catchment area
+                            0_isize => m_amod.get_value(row, col), // total catchment area
+                            1_isize => m_amod.get_value(row, col).sqrt(), // square root of catchment area
+                            2_isize => m_amod.get_value(row, col) / cellsize as f32, // specific catchment area
                             _ => panic!("Invalid 'area_type' parameter"),
                         };
         
@@ -824,6 +824,6 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
 
     for _ in 0..rows {
         let (row, vec_twi) = rx.recv().expect("Error receiving data from thread.");
-        twi.set_row_data_unsafe(row, vec_twi);
+        twi.set_row_data(row, vec_twi);
     }
 }
