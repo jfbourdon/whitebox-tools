@@ -81,7 +81,7 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter {
             name: "Weights File".to_owned(),
             flags: vec!["--weights".to_owned()], 
-            description: "Weights raster file.".to_owned(),
+            description: "Weights raster file for initial catchment area.".to_owned(),
             parameter_type: ParameterType::ExistingFile(ParameterFileType::Raster),
             default_value: None,
             optional: true,
@@ -488,22 +488,13 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
 
 
-        // Création du masque de non traitement
-        // Pour l'instant je traite partout (aucun masque), mais je devrai ajouter la possibilité d'importation
-        // d'une telle matrice... dans le fond
-        let mut m_mask: Array2D<i8> = Array2D::new(rows, columns, 0i8, -1i8)?;
-
-
-        // Création de la matrice d'accumulation et de la matrice de poids
-        let mut m_area: Array2D<f32> = Array2D::new(rows, columns, -1f32, -1f32)?;
-
-
-
         // Calcul du MFD initial
         // N'est finalement pas parallélisable à cause de la modification
         // itérative de "m_area" et "m_slope"
-        println!("Calculate initial MFD...");
-
+        if verbose {
+            println!("Calculate initial MFD...")
+        };
+        let mut m_area: Array2D<f32> = Array2D::new(rows, columns, -1f32, -1f32)?;
         let dcol = [0, 1, 1, 1, 0, -1, -1, -1];
         let drow = [1, 1, 0, -1, -1, -1, 0, 1];
         let diag_cellsize = (2.0 * cellsize * cellsize).sqrt();
@@ -591,12 +582,16 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
 
         // Calcul itératif de l'accumulation de flux modifiée
-        println!("Modify MFD...");
-        let m_amod = get_modified(&m_area, m_suction, m_mask);
+        if verbose {
+            println!("Modify MFD...")
+        };
+        let m_amod = get_modified(m_area, m_suction);
 
 
         // Calcul classique du TWI
-        println!("Calculate topographic wetness index...");
+        if verbose {
+            println!("Calculate topographic wetness index...")
+        };
         let mut twi = Raster::initialize_using_file(&output_file, &dem);
         twi.configs.data_type = DataType::F32;
         get_twi(&mut twi, m_amod, m_slope, dem, area_type, slope_type, slope_min, slope_offset);
@@ -669,13 +664,13 @@ fn get_gradient<'a>(dem: &'a Raster, row: isize, col: isize, z:f64, cellsize: f6
     let h = (dz[1] - dz[3]) / (2.0 * cellsize);
 
     let slope = (g*g + h*h).sqrt().atan() as f32;
-    // aspect = (-h/-g).atan()
+    // aspect = (-h/-g).atan();
 
     return slope;
 }
 
 
-fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mask: Array2D<i8>) -> Array2D<f32> {
+fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f32> {
     let rows = m_area_ini.rows as isize;
     let columns = m_area_ini.columns as isize;
     let num_procs = num_cpus::get() as isize;
@@ -697,18 +692,11 @@ fn get_modified<'a>(m_area_ini: &'a Array2D<f32>, m_suction: Array2D<f32>, m_mas
         // de variables, mais le compilateur voit peut-être les choses autrement).
         for row in 0..rows {
             for col in 0..columns {
-                // Un masque permet d'éviter à l'algorithme de perdre son temps dans une zone certaine d'eau (1 == eau, 0 == terre)
-                // Pas nécessairement la meilleure approche, je devrais peut-être plutôt modifier "m_area_ini" en entrée avec le masque
-                // pour y inscrire une valeur élevée d'accumulation sous le masque
-                // Accessoirement, est-ce que je pourrais remplir le mask avec le nodata au bons endroit pour éviter des calculs dans celles-ci?
-                let masked = m_mask.get_value_unsafe(row, col);
-                if masked == 0 {
-                    let area_mod = m_suction.get_value_unsafe(row, col) * get_local_maximum(&m_area, row, col);
-                    let area = m_area.get_value_unsafe(row, col);
-                    if area_mod > area {
-                        nb_changes += 1;
-                        m_area.set_value_unsafe(row, col, area_mod);
-                    }
+                let area_mod = m_suction.get_value_unsafe(row, col) * get_local_maximum(&m_area, row, col);
+                let area = m_area.get_value_unsafe(row, col);
+                if area_mod > area {
+                    nb_changes += 1;
+                    m_area.set_value_unsafe(row, col, area_mod);
                 }
             }
         }
@@ -812,8 +800,8 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
     let cellsize = dem.configs.resolution_x;
     let num_procs = num_cpus::get() as isize;
 
-    let slope_min_rad = slope_min * f32::consts::PI / 180.0;
-    let slope_offset_rad = slope_offset * f32::consts::PI / 180.0;
+    let slope_min_rad = slope_min.to_radians();
+    let slope_offset_rad = slope_offset.to_radians();
 
     let (tx, rx) = mpsc::channel();
     for tid in 0..num_procs {
