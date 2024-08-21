@@ -108,43 +108,43 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter {
             name: "Suction".to_owned(),
             flags: vec!["--suction".to_owned()],
-            description: "Optional suction factor (default is 10.0).".to_owned(),
+            description: "Optional suction factor; default is 10.0.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("10".to_owned()),
             optional: true,
         });
 
         parameters.push(ToolParameter {
-            name: "Slope weight".to_owned(),
+            name: "Slope Weight".to_owned(),
             flags: vec!["--slope_weight".to_owned()],
-            description: "Optional slope weight for index calculation (default is 1.0).".to_owned(),
+            description: "Optional slope weight for index calculation; default is 1.0.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("1".to_owned()),
             optional: true,
         });
 
         parameters.push(ToolParameter {
-            name: "Minimum slope (in degrees)".to_owned(),
+            name: "Minimum Slope".to_owned(),
             flags: vec!["--slope_min".to_owned()],
-            description: "Optional minimum slope for index calculation (default is 0.0).".to_owned(),
+            description: "Optional minimum slope for index calculation (in degrees); default is 0.0.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("0".to_owned()),
             optional: true,
         });
 
         parameters.push(ToolParameter {
-            name: "Slope offset (in degrees)".to_owned(),
+            name: "Slope Offset".to_owned(),
             flags: vec!["--slope_offset".to_owned()],
-            description: "Optional slope offset for index calculation (default is 0.1).".to_owned(),
+            description: "Optional slope offset for index calculation (in degrees); default is 0.1.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("0.1".to_owned()),
             optional: true,
         });
 
         parameters.push(ToolParameter {
-            name: "MFD convergence".to_owned(),
+            name: "MFD Convergence".to_owned(),
             flags: vec!["--mfd_convergence".to_owned()],
-            description: "Optional MFD convergence parameter (default is 1.1).".to_owned(),
+            description: "Optional MFD convergence parameter; default is 1.1.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("1.1".to_owned()),
             optional: true,
