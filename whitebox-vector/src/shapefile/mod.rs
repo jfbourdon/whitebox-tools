@@ -563,7 +563,7 @@ impl Shapefile {
                     self.projection.push_str(&format!("{}\n", line_unwrapped));
                 }
             }
-            Err(_) => println!("Warning: Projection file not located."),
+            Err(_) => {}, //println!("Warning: Projection file not located."),
         }
 
         ///////////////////////////////
@@ -1211,14 +1211,14 @@ impl Shapefile {
                         let dc = self.attributes.fields[j as usize].decimal_count as usize;
                         let s = v.to_string();
                         let e: Vec<&str> = s.split(".").collect();
-                        let f = if e.len() == 2 { e[1].clone() } else { "" };
+                        let f = if e.len() == 2 { e[1] } else { "" };
                         let mut s: String;
                         let decimals = if f.len() > dc {
                             let (e2, _) = f.split_at(dc);
                             e2
                         } else if f.len() < dc {
                             // pad with some trailing zeros
-                            s = f.clone().to_string();
+                            s = f.to_string();
                             for _ in 0..(dc - f.len()) {
                                 s.push_str("0");
                             }
