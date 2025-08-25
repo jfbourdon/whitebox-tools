@@ -146,6 +146,15 @@ impl BreachDepressionsLeastCost {
         });
 
         parameters.push(ToolParameter {
+            name: "Masking File".to_owned(),
+            flags: vec!["--mask".to_owned()],
+            description: "Masking file which indicate cells to leave untouched.".to_owned(),
+            parameter_type: ParameterType::ExistingFile(ParameterFileType::Raster),
+            default_value: None,
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
             name: "Minimize breach distances?".to_owned(),
             flags: vec!["--min_dist".to_owned()],
             description: "Optional flag indicating whether to minimize breach distances."
@@ -245,6 +254,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let mut flat_increment = f64::NAN;
         let mut fill_deps = false;
         let mut minimize_dist = false;
+        let mut mask_file = String::new();
 
         if args.len() == 0 {
             return Err(Error::new(
@@ -312,6 +322,12 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                 if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
                     fill_deps = true;
                 }
+            }  else if flag_val == "-mask" {
+                mask_file = if keyval {
+                    vec[1].to_string()
+                } else {
+                    args[i + 1].to_string()
+                };
             }
         }
 
@@ -376,6 +392,35 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
             num_procs = max_procs;
         }
 
+
+
+        let mut mask_raw = Array2D::new(rows, columns, 0u8, 0u8)?;
+        if !mask_file.is_empty() {
+            let mask_f64 = Raster::new(&mask_file, "r").expect("Error reading mask raster file");
+        
+            // Make sure the mask_file has the same size of the input file (resolution is assumed to be the same)
+            if input.configs.rows != mask_f64.configs.rows  || input.configs.columns != mask_f64.configs.columns {
+                return Err(Error::new(ErrorKind::InvalidInput,
+                                    "The mask and dem raster files must have the same number of rows and columns and spatial extent."));
+            }
+
+            // Transposition des valeurs dans un masque 8bit
+            // Tout ce qui n'est pas 0 fera partie du masque
+            for row in 0..rows {
+                for col in 0..columns {
+                    z = mask_f64.get_value(row, col);
+                    if z != 0.0 {
+                        mask_raw.set_value(row, col, 1u8);
+                    }
+                }
+            }
+            drop(mask_f64);
+        }
+        let mask = Arc::new(mask_raw.clone());
+        drop(mask_raw);
+
+
+
         let small_num = if !flat_increment.is_nan() || flat_increment == 0f64 {
             flat_increment
         } else {
@@ -394,9 +439,10 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let (tx, rx) = mpsc::channel();
         for tid in 0..num_procs {
             let input = input.clone();
+            let mask = mask.clone();
             let tx = tx.clone();
             thread::spawn(move || {
-                let (mut z, mut zn, mut min_zn): (f64, f64, f64);
+                let (mut z, mut zn, mut min_zn, mut zm): (f64, f64, f64, u8);
                 let mut flag: bool;
                 let dx = [1, 1, 1, 0, -1, -1, -1, 0];
                 let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
@@ -406,27 +452,31 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                     for col in 0..columns {
                         z = input.get_value(row, col);
                         if z != nodata {
-                            flag = true;
-                            min_zn = f64::INFINITY;
-                            for n in 0..8 {
-                                zn = input.get_value(row + dy[n], col + dx[n]);
-                                if zn < min_zn {
-                                    min_zn = zn;
+                            // Proceed only if the cell is not inside the mask
+                            zm = mask.get_value(row, col);
+                            if zm == 0u8 {
+                                flag = true;
+                                min_zn = f64::INFINITY;
+                                for n in 0..8 {
+                                    zn = input.get_value(row + dy[n], col + dx[n]);
+                                    if zn < min_zn {
+                                        min_zn = zn;
+                                    }
+                                    if zn == nodata {
+                                        // It's an edge cell.
+                                        flag = false;
+                                        break;
+                                    }
+                                    if zn < z {
+                                        // There's a lower neighbour
+                                        flag = false;
+                                        break;
+                                    }
                                 }
-                                if zn == nodata {
-                                    // It's an edge cell.
-                                    flag = false;
-                                    break;
+                                if flag {
+                                    data[col as usize] = min_zn - small_num;
+                                    pits.push((row, col, z));
                                 }
-                                if zn < z {
-                                    // There's a lower neighbour
-                                    flag = false;
-                                    break;
-                                }
-                            }
-                            if flag {
-                                data[col as usize] = min_zn - small_num;
-                                pits.push((row, col, z));
                             }
                         }
                     }
