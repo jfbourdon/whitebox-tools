@@ -353,6 +353,9 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         if !output_file.contains(&sep) && !output_file.contains("/") {
             output_file = format!("{}{}", working_directory, output_file);
         }
+        if !mask_file.contains(&sep) && !mask_file.contains("/") {
+            mask_file = format!("{}{}", working_directory, mask_file);
+        }
 
         if verbose {
             println!("Reading data...")
