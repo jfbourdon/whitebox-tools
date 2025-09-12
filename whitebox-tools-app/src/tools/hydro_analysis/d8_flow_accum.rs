@@ -8,6 +8,7 @@ License: MIT
 
 use whitebox_raster::*;
 use whitebox_common::structures::Array2D;
+use whitebox_vector::{ShapeType, Shapefile};
 use crate::tools::*;
 use num_cpus;
 use std::env;
@@ -133,6 +134,17 @@ impl D8FlowAccumulation {
             optional: true,
         });
 
+        parameters.push(ToolParameter {
+            name: "Input Pipes File".to_owned(),
+            flags: vec!["--pipes".to_owned()],
+            description: "Input vector pipes file.".to_owned(),
+            parameter_type: ParameterType::ExistingFile(ParameterFileType::Vector(
+                VectorGeometryType::Line,
+            )),
+            default_value: None,
+            optional: true,
+        });
+
         let sep: String = path::MAIN_SEPARATOR.to_string();
         let e = format!("{}", env::current_exe().unwrap().display());
         let mut parent = env::current_exe().unwrap();
@@ -195,6 +207,7 @@ impl WhiteboxTool for D8FlowAccumulation {
     ) -> Result<(), Error> {
         let mut input_file = String::new();
         let mut output_file = String::new();
+        let mut pipes_file = String::new();
         let mut out_type = String::from("sca");
         let mut log_transform = false;
         let mut clip_max = false;
@@ -259,6 +272,12 @@ impl WhiteboxTool for D8FlowAccumulation {
                     esri_style = true;
                     pntr_input = true;
                 }
+            } else if flag_val == "-pipes" {
+                pipes_file = if keyval {
+                    vec[1].to_string()
+                } else {
+                    args[i + 1].to_string()
+                }
             }
         }
 
@@ -284,6 +303,9 @@ impl WhiteboxTool for D8FlowAccumulation {
         if !output_file.contains(&sep) && !output_file.contains("/") {
             output_file = format!("{}{}", working_directory, output_file);
         }
+        if !pipes_file.contains(&sep) && !pipes_file.contains("/") {
+            pipes_file = format!("{}{}", working_directory, pipes_file);
+        }
 
         if verbose {
             println!("Reading data...")
@@ -308,6 +330,68 @@ impl WhiteboxTool for D8FlowAccumulation {
         if max_procs > 0 && max_procs < num_procs {
             num_procs = max_procs;
         }
+
+
+        let pipe_mask_nodata = 0_usize;
+        let mut pipes_mask = Array2D::new(rows, columns, pipe_mask_nodata, pipe_mask_nodata)?;
+        let mut set_idx_pipes = Vec::with_capacity(1000_usize);
+        let mut pipes_coordinates_static = Vec::with_capacity(1000_usize);
+        if !pipes_file.is_empty() {
+            let pipes = Shapefile::read(&pipes_file).expect("Error reading input Shapefile.");
+            // Make sure the input vector file is of polyline type
+            // Should explicitly look for LINESTRING only and not MULTILINESTRING ideally
+            if pipes.header.shape_type.base_shape_type() != ShapeType::PolyLine
+            {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "The input pipes vector data must be of polyline base shape type.",
+                ));
+            }
+            
+            // Create list of ends coordinates for each pipe along with an initial
+            // upstream accumulation value of 0. The pipe raster mask at each inlet
+            // is also filled.
+            let fa_ini = 0f64;
+            pipes_coordinates_static.push((0_isize, 0_isize, 0_isize, 0_isize, fa_ini));
+            for record_num in 0..pipes.num_records {
+                println!("Pipe record: {}", record_num);
+                let record = pipes.get_record(record_num);
+                
+                // Ensure that only singlepart polylines are used. This case should be catched right at loading
+                // but WhiteboxTools doesn't seem to currently distinguish singlepart from multipart
+                // (see lines 500 and up in whitebox-vector\src\shapefile\geometry.rs)
+                if record.num_parts as usize > 1
+                {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "The input vector data must be of polyline singlepart type, not polyline multipart.",
+                    ));
+                }
+
+                // Find the row/col intersection point of both ends of the pipe
+                let start_point = 0_usize;
+                let end_point = record.num_points as usize - 1;
+                let row_start = input.get_row_from_y(record.points[start_point].y);
+                let col_start = input.get_column_from_x(record.points[start_point].x);
+                let row_end = input.get_row_from_y(record.points[end_point].y);
+                let col_end = input.get_column_from_x(record.points[end_point].x);
+
+                // Set in the mask the starting position of each pipe with its index as cell value.
+                // The ends coordinates list
+                pipes_mask.set_value(row_start, col_start, record_num + 1);
+                pipes_coordinates_static.push((row_start, col_start, row_end, col_end, fa_ini));
+                set_idx_pipes.push(record_num + 1);
+            }
+
+
+        // VALIDATIONS À AJOUTER
+        // - Les début et fin de chaque conduit doivent être contenus dans la matrice sinon ils doivent être ignorés
+        // - Il faut que les points d'entrée des conduits soient des cuvettes, soit avec flow_dir == 0
+        // - Il ne faut pas que deux conduits partent de la même cellule
+        // - Il ne faut pas qu'un cycle soit créé avec un conduit qui ramènerait l'eau en amont d'elle-même
+        }
+
+
 
         if !pntr_input {
             // calculate the flow direction from the input DEM
@@ -570,6 +654,40 @@ impl WhiteboxTool for D8FlowAccumulation {
                 }
             }
         }
+
+
+
+        // Poursuite de l'accumulation à partir des points d'entrées des conduits
+        while !set_idx_pipes.is_empty() {
+            let idx_pipe = set_idx_pipes.pop().expect("Error during pop operation.");
+            let (row_start, col_start, row_end, col_end, fa_ini) = pipes_coordinates_static[idx_pipe];
+
+            fa = output[(row_start, col_start)] - fa_ini;
+            pipes_coordinates_static[idx_pipe].4 = fa; // mets à jour l'accumulation à l'entrée au cas où on devrait à nouveau emprunter ce passage
+            output.increment(row_end, col_end, fa);  // prends l'accumulation à l'entrée et la reporte à la sortie
+            stack.push((row_end, col_end));
+
+            while !stack.is_empty() {
+                let cell = stack.pop().expect("Error during pop operation.");
+                row = cell.0;
+                col = cell.1;
+                dir = flow_dir.get_value(row, col);
+                if dir >= 0 {
+                    row_n = row + dy[dir as usize];
+                    col_n = col + dx[dir as usize];
+                    output.increment(row_n, col_n, fa);
+                    stack.push((row_n, col_n));
+                } else {
+                    let idx_pipe_next = pipes_mask.get_value(row, col) as usize;
+                    if (idx_pipe_next != pipe_mask_nodata) & !set_idx_pipes.contains(&idx_pipe_next) {
+                        // ajouter aux prochains conduits à visiter seulement si pas déjà présent dans le stack
+                        set_idx_pipes.push(idx_pipe_next);
+                    }
+                }
+            }
+        }
+
+
 
         let mut cell_area = cell_size_x * cell_size_y;
         // if flow width is allowed to vary by direction, the flow accumulation output will not
