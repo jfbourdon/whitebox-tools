@@ -90,7 +90,7 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter{
             name: "Area Type".to_owned(), 
             flags: vec!["--area_type".to_owned()], 
-            description: "Area type; one of 'total catchment area', 'square root of catchment area', or 'specific catchment area (default)'.".to_owned(),
+            description: "Area type; one of 'total catchment area', 'square root of catchment area', or 'specific catchment area' (default).".to_owned(),
             parameter_type: ParameterType::OptionList(vec!["total catchment area".to_owned(), "square root of catchment area".to_owned(), "specific catchment area".to_owned()]),
             default_value: Some("specific catchment area".to_owned()),
             optional: true
@@ -99,7 +99,7 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter{
             name: "Slope Type".to_owned(), 
             flags: vec!["--slope_type".to_owned()], 
-            description: "Slope type; one of 'local slope' or 'catchment slope (default)'.".to_owned(),
+            description: "Slope type; one of 'local slope' or 'catchment slope' (default).".to_owned(),
             parameter_type: ParameterType::OptionList(vec!["local slope".to_owned(), "catchment slope".to_owned()]),
             default_value: Some("catchment slope".to_owned()),
             optional: true
@@ -568,7 +568,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
 
 
         // Ajustement de l'accumulation en fonction de la taille de cellule
-        // Pas pertinent à paralléliser, il risque d'y avoir utimement plus de visites
+        // Pas pertinent à paralléliser car il risque d'y avoir ultimement plus de visites
         // de cellules
         if verbose {
             println!("Adjust MFD to cell area...")
@@ -738,8 +738,8 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
     for tid in 0..num_procs {
         let m_area_ini = m_area_ini.clone();
         let m_area = m_area.clone();
-        let dcol = [0, 1, 1, 1, 0, -1, -1, -1];
-        let drow = [1, 1, 0, -1, -1, -1, 0, 1];
+        let dcol = [0, 0, 1, 1, 1, 0, -1, -1, -1];
+        let drow = [0, 1, 1, 0, -1, -1, -1, 0, 1];
         let tx = tx.clone();
         thread::spawn(move || {
             for row in (0..rows).filter(|r| r % num_procs == tid) {
@@ -747,9 +747,9 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
                 for col in 0..columns {
                     if m_area_ini.get_value(row, col) != m_area.nodata {
                         let mut area_modified = false;
-                        let mut n = 1_isize;
-                        let mut z = vec_amod[col as usize];
-                        for ii in 0..8 {
+                        let mut n = 0_isize;
+                        let mut z = 0_f32;
+                        for ii in 0..9 {
                             let row_n = row + drow[ii];
                             let col_n = col + dcol[ii];
                             let area_ini = m_area_ini.get_value(row_n, col_n);
@@ -833,7 +833,7 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
                         };
 
                         let slope2 = slope + slope_offset_rad;
-                        slope = if slope2 > slope_min_rad { slope2.atan() } else { slope_min_rad.atan() };
+                        slope = if slope2 > slope_min_rad { slope2.tan() } else { slope_min_rad.tan() };
         
                         let area = match area_type {
                             0_isize => m_amod.get_value(row, col), // total catchment area
