@@ -703,25 +703,12 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
         // de variables, mais le compilateur voit peut-être les choses autrement).
         for row in 0..rows {
             for col in 0..columns {
-                let area_mod = m_suction.get_value(row, col) * get_local_maximum(&m_area, row, col);
-                let area = m_area.get_value(row, col);
-                if area_mod > area {
+                let suction = m_suction.get_value(row, col);
+                if suction != m_suction.nodata {
+                    let area_mod = suction * get_local_maximum(&m_area, row, col);
+                    if area_mod > m_area.get_value(row, col) {
                     nb_changes += 1;
                     m_area.set_value(row, col, area_mod);
-                }
-            }
-        }
-
-        if nb_changes > 0 {
-            nb_changes = 0;
-
-            // Boucle parallélisable
-            for row in 0..rows {
-                for col in 0..columns {
-                    let area = m_area.get_value(row, col);
-                    if area != m_amod.get_value(row, col) {
-                        nb_changes += 1;
-                        m_amod.set_value(row, col, area);
                     }
                 }
             }
@@ -782,22 +769,18 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
 
 
 fn get_local_maximum<'a>(m_grid: &'a Array2D<f32>, row: isize, col: isize) -> f32 {
-    let nodata = m_grid.nodata;
-    let dcol = [0, 1, 1, 1, 0, -1, -1, -1];
-    let drow = [1, 1, 0, -1, -1, -1, 0, 1];
     let (mut row_n, mut col_n): (isize, isize);
     let mut z_n: f32;
+    let mut val_max = m_grid.nodata;
 
-    let mut val_max = m_grid.get_value(row, col);
-
-    for ii in 0..8 {
-        row_n = row + drow[ii];
-        col_n = col + dcol[ii];
+    // Un simple .max fonctionne car on sait que la valeur de NoData est -1 et
+    // que les valeurs d'accumulation y seront toujours supérieures
+    for drow in -1..2 {
+        row_n = row + drow;
+        for dcol in -1..2 {
+            col_n = col + dcol;
             z_n = m_grid.get_value(row_n, col_n);
-            if z_n != nodata {
-                if z_n > val_max {
-                    val_max = z_n;
-                }
+            val_max = val_max.max(z_n);
             }
     }
     return val_max;
