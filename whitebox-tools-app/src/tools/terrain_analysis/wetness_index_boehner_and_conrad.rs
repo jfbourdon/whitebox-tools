@@ -769,17 +769,16 @@ fn get_modified(m_area_ini: Array2D<f32>, m_suction: Array2D<f32>) -> Array2D<f3
 
 
 fn get_local_maximum<'a>(m_grid: &'a Array2D<f32>, row: isize, col: isize) -> f32 {
-    let (mut row_n, mut col_n): (isize, isize);
-    let mut z_n: f32;
-    let mut val_max = m_grid.nodata;
-
-    // Un simple .max fonctionne car on sait que la valeur de NoData est -1 et
-    // que les valeurs d'accumulation y seront toujours supérieures
+    // Utiliser .max() fonctionne car il est su que la valeur de NoData est -1_f32
+    // et que les valeurs d'accumulation y seront toujours supérieures. Déclarer explicitement
+    // la valeur de NoData permet un gain significatif de performance par rapport à la récupérer
+    // en paramètre ou encore à la récupérer avec m_grid.nodata.
+    let mut val_max = -1_f32;
     for drow in -1..2 {
-        row_n = row + drow;
+        let row_n = row + drow;
         for dcol in -1..2 {
-            col_n = col + dcol;
-            z_n = m_grid.get_value(row_n, col_n);
+            let col_n = col + dcol;
+            let z_n = m_grid.get_value(row_n, col_n);
             val_max = val_max.max(z_n);
             }
     }
