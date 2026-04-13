@@ -883,3 +883,80 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
         twi.set_row_data(row, vec_twi);
     }
 }
+
+
+
+fn get_d8<'a>(dem: &'a Arc<Raster>) -> Array2D<i16> {
+    let rows = dem.configs.rows as isize;
+    let columns = dem.configs.columns as isize;
+    let nodata = dem.configs.nodata;
+    let cell_size_x = dem.configs.resolution_x;
+    let cell_size_y = dem.configs.resolution_y;
+    let diag_cell_size = (cell_size_x * cell_size_x + cell_size_y * cell_size_y).sqrt();
+
+    let out_nodata = -1i16;
+    let mut d8: Array2D<i16> = Array2D::new(rows, columns, out_nodata, out_nodata).unwrap();
+
+    let num_procs = num_cpus::get() as isize;
+    let (tx, rx) = mpsc::channel();
+    for tid in 0..num_procs {
+        let dem = dem.clone();
+        let tx1 = tx.clone();
+        thread::spawn(move || {
+            let d_x = [1, 1, 1, 0, -1, -1, -1, 0];
+            let d_y = [-1, 0, 1, 1, 1, 0, -1, -1];
+            let grid_lengths = [
+                diag_cell_size,
+                cell_size_x,
+                diag_cell_size,
+                cell_size_y,
+                diag_cell_size,
+                cell_size_x,
+                diag_cell_size,
+                cell_size_y,
+            ];
+
+            let out_vals = [1i16, 2, 4, 8, 16, 32, 64, 128];  // WBT pointer style
+            // Ultimement, mettre en i8 et conserver les indices plutôt que les valeurs
+
+            let (mut z, mut z_n, mut slope): (f64, f64, f64);
+            for row in (0..rows).filter(|r| r % num_procs == tid) {
+                let mut data = vec![out_nodata; columns as usize];
+                for col in 0..columns {
+                    z = dem[(row, col)];
+                    if z != nodata {
+                        let mut dir = 0;
+                        let mut max_slope = f64::MIN;
+                        for i in 0..8 {
+                            z_n = dem[(row + d_y[i], col + d_x[i])];
+                            if z_n != nodata {
+                                slope = (z - z_n) / grid_lengths[i];
+                                if slope > max_slope && slope > 0f64 {
+                                    max_slope = slope;
+                                    dir = i;
+                                }
+                            }
+                        }
+                        if max_slope >= 0f64 {
+                            data[col as usize] = out_vals[dir];
+                        } else {
+                            data[col as usize] = 0i16;
+                        }
+                    }
+                }
+                tx1.send((row, data)).unwrap();
+            }
+        });
+    }
+
+
+    for row in 0..rows {
+        let data = rx.recv().expect("Error receiving data from thread.");
+        d8.set_row_data(data.0, data.1);
+    }
+
+
+    return d8;
+
+}
+
