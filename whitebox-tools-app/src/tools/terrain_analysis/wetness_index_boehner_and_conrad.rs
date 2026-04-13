@@ -960,3 +960,102 @@ fn get_d8<'a>(dem: &'a Arc<Raster>) -> Array2D<i16> {
 
 }
 
+
+
+
+
+fn get_downslope_index<'a>(dem: &'a Raster, d8: &'a Array2D<i16>, row: isize, col: isize, max_drop:f64, max_dist:f64) -> f32 {
+    let nodata = dem.configs.nodata;
+    let rows = dem.configs.rows;
+    let columns = dem.configs.columns;
+    let cell_size_x = dem.configs.resolution_x;
+    let cell_size_y = dem.configs.resolution_y;
+    let diag_cell_size = (cell_size_x * cell_size_x + cell_size_y * cell_size_y).sqrt();
+
+    let fdir_nodata = d8.nodata;
+
+
+    let d_x = [1, 1, 1, 0, -1, -1, -1, 0];
+    let d_y = [-1, 0, 1, 1, 1, 0, -1, -1];
+    let grid_lengths = [
+        diag_cell_size,
+        cell_size_x,
+        diag_cell_size,
+        cell_size_y,
+        diag_cell_size,
+        cell_size_x,
+        diag_cell_size,
+        cell_size_y,
+    ];
+
+
+    let mut pntr_matches: [usize; 129] = [0usize; 129];
+    pntr_matches[1] = 0usize;
+    pntr_matches[2] = 1usize;
+    pntr_matches[4] = 2usize;
+    pntr_matches[8] = 3usize;
+    pntr_matches[16] = 4usize;
+    pntr_matches[32] = 5usize;
+    pntr_matches[64] = 6usize;
+    pntr_matches[128] = 7usize;
+
+
+
+
+    // Create a list to store values for distance and elevation reach by algorithm (sum_dist_list, sum_drop_list), and initialise value (0)
+    let mut sum_dist_list = Vec::<(f64)>::with_capacity(rows + columns);
+    let mut sum_drop_list = Vec::<(f64)>::with_capacity(rows + columns);
+    let mut sum_dist = 0f64;
+    let mut sum_drop = 0f64;
+
+    // Get elevation of DEM pixel and skip NoData
+    let z = dem.get_value(row, col);
+    if z == nodata {
+        return 0f32;
+    }
+
+
+    // Extract starting point where the algorithm will move
+    let mut last_row = row;
+    let mut last_col = col;
+
+
+    // Descente le long du D8
+    while sum_dist <= max_dist && sum_drop <= max_drop {
+        // Get the corresponding flow direction pixel
+        let fdir = d8.get_value(last_row, last_col);
+
+        // If flow direction value correspond to NoData or NoFlow,
+        // stop iteration as the end of flow has been reached
+        if fdir <= 0i16 {
+            break;
+        }
+
+        // Get the line of the dictionary to get flow direction of current pixel
+        let idx = pntr_matches[fdir as usize];
+
+        // Move the position of pixel according to flow direction
+        last_row += d_y[idx];
+        last_col += d_x[idx];
+
+        // Compute the difference of elevation between initial DEM elevation and current DEM elevation
+        sum_drop = z - dem.get_value(last_row, last_col);
+        sum_drop_list.push(sum_drop);
+
+        // Compute the distance by flow direction between initial DEM pixel and current DEM pixel
+        sum_dist += grid_lengths[idx];
+        sum_dist_list.push(sum_dist);
+    }
+
+
+    let mut idx = sum_dist_list.len() as usize;
+    if sum_drop > max_drop {
+        idx = ((idx).div_euclid(2) - 1) as usize
+    }
+
+
+    let downslope_index = (sum_drop_list[idx] / sum_dist_list[idx] * 100_f64) as f32;
+
+    return downslope_index;
+}
+
