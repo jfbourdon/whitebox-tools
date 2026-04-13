@@ -108,7 +108,7 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter {
             name: "Suction".to_owned(),
             flags: vec!["--suction".to_owned()],
-            description: "Optional suction factor; default is 10.0.".to_owned(),
+            description: "Suction factor; default is 10.0.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("10".to_owned()),
             optional: true,
@@ -117,7 +117,7 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter {
             name: "Slope Weight".to_owned(),
             flags: vec!["--slope_weight".to_owned()],
-            description: "Optional slope weight for index calculation; default is 1.0.".to_owned(),
+            description: "Slope weight for index calculation; default is 1.0.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("1".to_owned()),
             optional: true,
@@ -126,7 +126,7 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter {
             name: "Minimum Slope".to_owned(),
             flags: vec!["--slope_min".to_owned()],
-            description: "Optional minimum slope for index calculation (in degrees); default is 0.0.".to_owned(),
+            description: "Minimum slope for index calculation (in degrees); default is 0.0.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("0".to_owned()),
             optional: true,
@@ -135,7 +135,7 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter {
             name: "Slope Offset".to_owned(),
             flags: vec!["--slope_offset".to_owned()],
-            description: "Optional slope offset for index calculation (in degrees); default is 0.1.".to_owned(),
+            description: "Slope offset for index calculation (in degrees); default is 0.1.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("0.1".to_owned()),
             optional: true,
@@ -144,9 +144,27 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter {
             name: "MFD Convergence".to_owned(),
             flags: vec!["--mfd_convergence".to_owned()],
-            description: "Optional MFD convergence parameter; default is 1.1.".to_owned(),
+            description: "MFD convergence parameter; default is 1.1.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("1.1".to_owned()),
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
+            name: "Vertical Drop".to_owned(),
+            flags: vec!["--drop".to_owned()],
+            description: "Vertical drop value (in height unit); default is 1.".to_owned(),
+            parameter_type: ParameterType::Float,
+            default_value: Some("1".to_owned()),
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
+            name: "Horizontal Distance".to_owned(),
+            flags: vec!["--dist".to_owned()],
+            description: "Maximal horizontal distance to reach defined vertical drop (in horizontal unit); default is 50.".to_owned(),
+            parameter_type: ParameterType::Float,
+            default_value: Some("50".to_owned()),
             optional: true,
         });
 
@@ -235,6 +253,8 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let mut slope_min = 0_f32;
         let mut slope_offset = 0.1_f32;
         let mut mfd_convergence = 1.1_f64;
+        let mut drop_val = 1_f64;
+        let mut dist_val = 50_f64;
 
 
         if args.len() == 0 {
@@ -266,14 +286,14 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                     vec[1].to_string()
                 } else {
                     args[i + 1].to_string()
-                }
+                };
 
             } else if flag_val == "-o" || flag_val == "-output" {
                 output_file = if keyval {
                     vec[1].to_string()
                 } else {
                     args[i + 1].to_string()
-                }
+                };
 
             } else if flag_val == "-area_type" {
                 let area_type_flag = if keyval {
@@ -311,7 +331,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         .to_string()
                         .parse::<f32>()
                         .expect(&format!("Error parsing {}", flag_val))
-                }
+                };
 
             } else if flag_val == "-slope_weight" {
                 slope_weight = if keyval {
@@ -324,7 +344,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         .to_string()
                         .parse::<f32>()
                         .expect(&format!("Error parsing {}", flag_val))
-                }
+                };
 
             } else if flag_val == "-slope_min" {
                 slope_min = if keyval {
@@ -337,7 +357,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         .to_string()
                         .parse::<f32>()
                         .expect(&format!("Error parsing {}", flag_val))
-                }
+                };
 
             } else if flag_val == "-slope_offset" {
                 slope_offset = if keyval {
@@ -350,10 +370,36 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         .to_string()
                         .parse::<f32>()
                         .expect(&format!("Error parsing {}", flag_val))
-                }
+                };
 
             } else if flag_val == "-mfd_convergence" {
                 mfd_convergence = if keyval {
+                    vec[1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                } else {
+                    args[i + 1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                };
+
+            }  else if flag_val == "-drop" {
+                drop_val = if keyval {
+                    vec[1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                } else {
+                    args[i + 1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                };
+
+            } else if flag_val == "-dist" {
+                dist_val = if keyval {
                     vec[1]
                         .to_string()
                         .parse::<f64>()
