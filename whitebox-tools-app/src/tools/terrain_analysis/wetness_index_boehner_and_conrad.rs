@@ -895,18 +895,18 @@ fn get_downslope_index<'a>(dem: &'a Raster, max_drop:f64, max_dist:f64) -> Array
     let cell_size_y = dem.configs.resolution_y;
     let diag_cell_size = (cell_size_x * cell_size_x + cell_size_y * cell_size_y).sqrt();
 
-            let d_x = [1, 1, 1, 0, -1, -1, -1, 0];
-            let d_y = [-1, 0, 1, 1, 1, 0, -1, -1];
-            let grid_lengths = [
-                diag_cell_size,
-                cell_size_x,
-                diag_cell_size,
-                cell_size_y,
-                diag_cell_size,
-                cell_size_x,
-                diag_cell_size,
-                cell_size_y,
-            ];
+    let d_x = [1, 1, 1, 0, -1, -1, -1, 0];
+    let d_y = [-1, 0, 1, 1, 1, 0, -1, -1];
+    let grid_lengths = [
+        diag_cell_size,
+        cell_size_x,
+        diag_cell_size,
+        cell_size_y,
+        diag_cell_size,
+        cell_size_x,
+        diag_cell_size,
+        cell_size_y,
+    ];
 
 
     // Compute D8 Flow Direction pointer array
@@ -969,44 +969,44 @@ fn get_downslope_index<'a>(dem: &'a Raster, max_drop:f64, max_dist:f64) -> Array
                 // (sum_dist_list, sum_drop_list), and initialise value (0)
                 let mut sum_dist_list = Vec::<f64>::with_capacity((rows + columns) as usize);
                 let mut sum_drop_list = Vec::<f64>::with_capacity((rows + columns) as usize);
-    let mut sum_dist = 0f64;
-    let mut sum_drop = 0f64;
+                let mut sum_dist = 0f64;
+                let mut sum_drop = 0f64;
 
-    // Extract starting point where the algorithm will move
+                // Extract starting point where the algorithm will move
                 let mut row_n = row;
                 let mut col_n = col;
 
 
                 // Follow D8 Pointer downstream until limits are reached
-    while sum_dist <= max_dist && sum_drop <= max_drop {
+                while sum_dist <= max_dist && sum_drop <= max_drop {
                     // Get the corresponding flow direction pixel and
                     // break out of loop if we are on a NoFlow cell
                     let fdir_idx = d8.get_value(row_n, col_n);
                     if fdir_idx == fdir_noflow {
-            break;
-        }
+                        break;
+                    }
 
-        // Move the position of pixel according to flow direction
+                    // Move the position of pixel according to flow direction
                     row_n += d_y[fdir_idx as usize];
                     col_n += d_x[fdir_idx as usize];
 
-        // Compute the difference of elevation between initial DEM elevation and current DEM elevation
+                    // Compute the difference of elevation between initial DEM elevation and current DEM elevation
                     sum_drop = z - dem.get_value(row_n, col_n);
-        sum_drop_list.push(sum_drop);
+                    sum_drop_list.push(sum_drop);
 
-        // Compute the distance by flow direction between initial DEM pixel and current DEM pixel
+                    // Compute the distance by flow direction between initial DEM pixel and current DEM pixel
                     sum_dist += grid_lengths[fdir_idx as usize];
-        sum_dist_list.push(sum_dist);
-    }
+                    sum_dist_list.push(sum_dist);
+                    }
 
 
                 if sum_dist_list.len() > 0 {
-    let mut idx = sum_dist_list.len() as usize;
-    if sum_drop > max_drop {
+                    let mut idx = sum_dist_list.len() as usize;
+                    if sum_drop > max_drop {
                         idx = ((idx as f64 / 2f64).floor() - 1f64) as usize
                     } else {
                         idx -= 1 as usize;
-    }
+                    }
 
                     downslope_index.set_value(row, col, (sum_drop_list[idx] / sum_dist_list[idx] * 100_f64) as f32);
                 }
