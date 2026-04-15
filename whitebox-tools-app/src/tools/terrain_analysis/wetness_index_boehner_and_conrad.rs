@@ -126,7 +126,7 @@ impl WetnessIndexBoehnerAndConrad {
         parameters.push(ToolParameter {
             name: "Minimum Slope".to_owned(),
             flags: vec!["--slope_min".to_owned()],
-            description: "Minimum slope for index calculation (in degrees); default is 0.0.".to_owned(),
+            description: "Minimum slope for index calculation (in radians); default is 0.001.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: Some("0".to_owned()),
             optional: true,
@@ -250,11 +250,11 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let mut slope_weight = 1_f32;
         let mut area_type = 2_isize;
         let mut slope_type = 1_isize;
-        let mut slope_min = 0_f32;
+        let mut slope_min = 0.001_f32;
         let mut slope_offset = 0.1_f32;
         let mut mfd_convergence = 1.1_f64;
-        let mut drop_val = 1_f64;
-        let mut dist_val = 50_f64;
+        let mut drop_max = 1_f64;
+        let mut dist_max = 50_f64;
 
 
         if args.len() == 0 {
@@ -386,7 +386,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                 };
 
             }  else if flag_val == "-drop" {
-                drop_val = if keyval {
+                drop_max = if keyval {
                     vec[1]
                         .to_string()
                         .parse::<f64>()
@@ -399,7 +399,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                 };
 
             } else if flag_val == "-dist" {
-                dist_val = if keyval {
+                dist_max = if keyval {
                     vec[1]
                         .to_string()
                         .parse::<f64>()
@@ -645,6 +645,13 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let m_amod = get_modified(m_area, m_suction);
 
 
+
+        // Calcul du Downslope Index
+        println!("Calculate Downslope Index...");
+        let m_slope = get_downslope_index(&dem, drop_max, dist_max);
+
+
+
         // Calcul classique du TWI
         if verbose {
             println!("Calculate topographic wetness index...")
@@ -839,8 +846,9 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
     let cellsize = dem.configs.resolution_x * dem.configs.resolution_y;
     let num_procs = num_cpus::get() as isize;
 
-    let slope_min_rad = slope_min.to_radians();
-    let slope_offset_rad = slope_offset.to_radians();
+    //let slope_min_rad = slope_min.to_radians();
+    let slope_min_rad = slope_min;
+    //let slope_offset_rad = slope_offset.to_radians();
 
     let (tx, rx) = mpsc::channel();
     for tid in 0..num_procs {
@@ -854,23 +862,10 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
                 for col in 0..columns {
                     let z = dem.get_value(row, col);
                     if z != nodata {
-                        let mut slope = match slope_type {
-                            0_isize => get_gradient(&dem, row, col, z, cellsize), // local slope
-                            1_isize => m_slope.get_value(row, col), // catchment slope
-                            _ => panic!("Invalid 'slope_type' parameter"),
-                        };
-
-                        let slope2 = slope + slope_offset_rad;
-                        slope = if slope2 > slope_min_rad { slope2.tan() } else { slope_min_rad.tan() };
-        
-                        let area = match area_type {
-                            0_isize => m_amod.get_value(row, col), // total catchment area
-                            1_isize => m_amod.get_value(row, col).sqrt(), // square root of catchment area
-                            2_isize => m_amod.get_value(row, col) / cellsize as f32, // specific catchment area
-                            _ => panic!("Invalid 'area_type' parameter"),
-                        };
-        
-                        vec_twi[col as usize] = (area / slope).ln() as f64;
+                        let mut slope_rad = m_slope.get_value(row, col).atan();
+                        slope_rad = if slope_rad < slope_min_rad { slope_min_rad } else { slope_rad };
+                        let area = m_amod.get_value(row, col);
+                        vec_twi[col as usize] = (area / slope_rad.tan()).ln() as f64;
                     }
                 }
                 tx.send((row, vec_twi)).unwrap();
@@ -957,9 +952,8 @@ fn get_downslope_index<'a>(dem: &'a Raster, max_drop:f64, max_dist:f64) -> Array
 
 
     // Compute Downslope Index array
-    let downslope_nodata = 0f32;
-    let mut downslope_index: Array2D<f32> = Array2D::new(rows, columns, downslope_nodata, downslope_nodata).unwrap();
-
+    let mut downslope_index: Array2D<f32> = Array2D::new(rows, columns, 0f32, 0f32).unwrap();
+    let max_cell_visits = (max_dist / cell_size_x.min(cell_size_y)).ceil() as usize;
 
     for row in 0..rows {
         for col in 0..columns {
@@ -967,8 +961,8 @@ fn get_downslope_index<'a>(dem: &'a Raster, max_drop:f64, max_dist:f64) -> Array
             if z != nodata {
                 // Create a list to store values for distance and elevation reach by algorithm
                 // (sum_dist_list, sum_drop_list), and initialise value (0)
-                let mut sum_dist_list = Vec::<f64>::with_capacity((rows + columns) as usize);
-                let mut sum_drop_list = Vec::<f64>::with_capacity((rows + columns) as usize);
+                let mut sum_dist_list = Vec::<f64>::with_capacity(max_cell_visits);
+                let mut sum_drop_list = Vec::<f64>::with_capacity(max_cell_visits);
                 let mut sum_dist = 0f64;
                 let mut sum_drop = 0f64;
 
@@ -1008,7 +1002,7 @@ fn get_downslope_index<'a>(dem: &'a Raster, max_drop:f64, max_dist:f64) -> Array
                         idx -= 1 as usize;
                     }
 
-                    downslope_index.set_value(row, col, (sum_drop_list[idx] / sum_dist_list[idx] * 100_f64) as f32);
+                    downslope_index.set_value(row, col, (sum_drop_list[idx] / sum_dist_list[idx]) as f32);
                 }
 
             }
