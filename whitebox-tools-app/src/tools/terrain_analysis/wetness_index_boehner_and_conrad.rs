@@ -79,9 +79,9 @@ impl WetnessIndexBoehnerAndConrad {
         });
 
         parameters.push(ToolParameter {
-            name: "Weights File".to_owned(),
-            flags: vec!["--weights".to_owned()], 
-            description: "Weights raster file for initial catchment area.".to_owned(),
+            name: "Flow File".to_owned(),
+            flags: vec!["--flow".to_owned()], 
+            description: "Flow raster file.".to_owned(),
             parameter_type: ParameterType::ExistingFile(ParameterFileType::Raster),
             default_value: None,
             optional: true,
@@ -244,7 +244,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         verbose: bool,
     ) -> Result<(), Error> {
         let mut dem_file = String::new();
-        let mut weights_file = String::new();
+        let mut flow_file = String::new();
         let mut output_file = String::new();
         let mut suction_weight = 10_f32;
         let mut slope_weight = 1_f32;
@@ -281,8 +281,8 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                     args[i + 1].to_string()
                 };
             
-            } else if flag_val == "-weights" {
-                weights_file = if keyval {
+            } else if flag_val == "-flow" {
+                flow_file = if keyval {
                     vec[1].to_string()
                 } else {
                     args[i + 1].to_string()
@@ -457,21 +457,6 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         }
         
 
-        let mut m_weights = Array2D::new(rows, columns, 1f32, -1f32)?;
-        if !weights_file.is_empty() { 
-            if verbose {
-                println!("Reading weights data...")
-            };
-            if !weights_file.contains(&sep) && !weights_file.contains("/") {
-                weights_file = format!("{}{}", working_directory, weights_file);
-            }
-            let r = Raster::new(&weights_file, "r")?;
-            if r.configs.rows != rows as usize || r.configs.columns != columns as usize {
-                return Err(Error::new(ErrorKind::InvalidInput,
-                                    "The input files must have the same number of rows and columns and spatial extent."));
-            }
-            m_weights = r.get_data_as_f32_array2d();
-        }
 
 
 
@@ -525,112 +510,143 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
             cells_ordered.append(&mut vec_cells);
         }
 
-        // In order to pop the values from highest to lowest, we need to sort them from lowest to highest.
-        // To ensure constant ordering from run to run (due to multiprocessing), values are first sorted by row and column
-        if verbose {
-            println!("Sorting cells...")
-        };
-        cells_ordered.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Equal));
-        cells_ordered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
-        cells_ordered.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(Equal));
 
 
-
-        // Calcul du MFD initial
-        // N'est finalement pas parallélisable à cause de la modification
-        // itérative de "m_area" et "m_slope"
-        if verbose {
-            println!("Calculate initial MFD...")
-        };
         let mut m_area: Array2D<f32> = Array2D::new(rows, columns, -1f32, -1f32)?;
-        let dcol = [0, 1, 1, 1, 0, -1, -1, -1];
-        let drow = [1, 1, 0, -1, -1, -1, 0, 1];
-        let diagres = (resx * resx + resy * resy).sqrt();
-        let grid_lengths = [resy, diagres, resx, diagres, resy, diagres, resx, diagres];
-
-        let nb_cells = cells_ordered.len();
-        let mut ii = 0_usize;
-
-
-        while let Some(cell) = cells_ordered.pop() {
-            let row: isize = cell.0;
-            let col: isize = cell.1;
-            let z: f64 = cell.2;
-
-            // Ajustement initial de l'accumulation (non parallélisable à cause de la modification itérative de "m_area" plus loin)
-            // L'ajout de 1 est simplement pour contrebalancer les valeurs de départ de m_area qui sont de -1. Considérant que je passe
-            // à travers toutes les cellules valides avec ce while, ça me permet de conserver à -1 uniquement les cellules NoData
-            let area = m_area.get_value(row, col) + m_weights.get_value(row, col) + 1f32;
-            m_area.set_value(row, col, area);
-
-            // Ajustement initial de la pente du catchment en fonction de l'accumulation
-            let slope = m_slope.get_value(row, col);
-            m_slope.set_value(row, col, slope / area);
-
-
-            // Ajustement final de l'accumulation et de la pente du catchment
-            let mut dz = vec![0_f32; 8];
-            let mut dz_sum = 0_f32;
-
-            for ii in 0..8 {
-                let row_n = row + drow[ii];
-                let col_n = col + dcol[ii];
-                let z_n = dem.get_value(row_n, col_n);
-                if z_n != nodata {
-                    let d = z - z_n;
-                    if d > 0.0 {
-                        dz[ii] = (d / grid_lengths[ii]).atan().powf(mfd_convergence) as f32;
-                        dz_sum += dz[ii];
+        if !flow_file.is_empty() { 
+            if verbose {
+                println!("Reading flow data...")
+            };
+            if !flow_file.contains(&sep) && !flow_file.contains("/") {
+                flow_file = format!("{}{}", working_directory, flow_file);
+            }
+            let r = Raster::new(&flow_file, "r")?;
+            if r.configs.rows != rows as usize || r.configs.columns != columns as usize {
+                return Err(Error::new(ErrorKind::InvalidInput,
+                                    "The input files must have the same number of rows and columns and spatial extent."));
+            }
+            m_area = r.get_data_as_f32_array2d();
+            let rows = r.configs.rows as isize;
+            let columns = r.configs.columns as isize;
+            let nodata = r.configs.nodata;
+            for row in 0..rows {
+                for col in 0..columns {
+                    let z = r.get_value(row, col);
+                    if z == nodata {
+                        m_area.set_value(row, col, m_area.nodata);
                     }
                 }
             }
+                    
 
-            if dz_sum > 0.0 {
+
+        } else {
+            
+            // In order to pop the values from highest to lowest, we need to sort them from lowest to highest.
+            // To ensure constant ordering from run to run (due to multiprocessing), values are first sorted by row and column
+            if verbose {
+                println!("Sorting cells...")
+            };
+            cells_ordered.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Equal));
+            cells_ordered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
+            cells_ordered.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(Equal));
+
+
+
+            // Calcul du MFD initial
+            // N'est finalement pas parallélisable à cause de la modification
+            // itérative de "m_area" et "m_slope"
+            if verbose {
+                println!("Calculate initial MFD...")
+            };
+            let dcol = [0, 1, 1, 1, 0, -1, -1, -1];
+            let drow = [1, 1, 0, -1, -1, -1, 0, 1];
+            let diagres = (resx * resx + resy * resy).sqrt();
+            let grid_lengths = [resy, diagres, resx, diagres, resy, diagres, resx, diagres];
+
+            let nb_cells = cells_ordered.len();
+            let mut ii = 0_usize;
+
+
+            while let Some(cell) = cells_ordered.pop() {
+                let row: isize = cell.0;
+                let col: isize = cell.1;
+                let z: f64 = cell.2;
+
+                // Ajustement initial de l'accumulation (non parallélisable à cause de la modification itérative de "m_area" plus loin)
+                // L'ajout de 1 est simplement pour contrebalancer les valeurs de départ de m_area qui sont de -1. Considérant que je passe
+                // à travers toutes les cellules valides avec ce while, ça me permet de conserver à -1 uniquement les cellules NoData
+                let area = m_area.get_value(row, col) + 1f32;
+                m_area.set_value(row, col, area);
+
+                // Ajustement initial de la pente du catchment en fonction de l'accumulation
+                let slope = m_slope.get_value(row, col);
+                m_slope.set_value(row, col, slope / area);
+
+
+                // Ajustement final de l'accumulation et de la pente du catchment
+                let mut dz = vec![0_f32; 8];
+                let mut dz_sum = 0_f32;
+
                 for ii in 0..8 {
-                    if dz[ii] > 0.0 {
-                        let row_n = row + drow[ii];
-                        let col_n = col + dcol[ii];
-                        let z_n = dem.get_value(row_n, col_n);
-                        if z_n != nodata {
-                            m_area.increment(row_n, col_n, area * dz[ii] / dz_sum);
-                            m_slope.increment(row_n, col_n, slope * dz[ii] / dz_sum);
+                    let row_n = row + drow[ii];
+                    let col_n = col + dcol[ii];
+                    let z_n = dem.get_value(row_n, col_n);
+                    if z_n != nodata {
+                        let d = z - z_n;
+                        if d > 0.0 {
+                            dz[ii] = (d / grid_lengths[ii]).atan().powf(mfd_convergence) as f32;
+                            dz_sum += dz[ii];
                         }
                     }
                 }
+
+                if dz_sum > 0.0 {
+                    for ii in 0..8 {
+                        if dz[ii] > 0.0 {
+                            let row_n = row + drow[ii];
+                            let col_n = col + dcol[ii];
+                            let z_n = dem.get_value(row_n, col_n);
+                            if z_n != nodata {
+                                m_area.increment(row_n, col_n, area * dz[ii] / dz_sum);
+                                m_slope.increment(row_n, col_n, slope * dz[ii] / dz_sum);
+                            }
+                        }
+                    }
+                }
+
+
+                if verbose {
+                    ii += 1;
+                    progress = (100.0_f64 * ii as f64 / (nb_cells - 1) as f64) as usize;
+                    if progress != old_progress {
+                        println!("Initial MFD: {}%", progress);
+                        old_progress = progress;
+                    }
+                }
+
+
             }
 
 
+            // Ajustement de l'accumulation en fonction de la taille de cellule
+            // Pas pertinent à paralléliser car il risque d'y avoir ultimement plus de visites
+            // de cellules
             if verbose {
-                ii += 1;
-                progress = (100.0_f64 * ii as f64 / (nb_cells - 1) as f64) as usize;
-                if progress != old_progress {
-                    println!("Initial MFD: {}%", progress);
-                    old_progress = progress;
+                println!("Adjust MFD to cell area...")
+            };
+            let cell_area = (resx * resy) as f32;
+            for row in 0..rows {
+                for col in 0..columns {
+                    let z = dem.get_value(row, col);
+                    if z != nodata {
+                        m_area.set_value(row, col, m_area.get_value(row, col) * cell_area);
+                    }
                 }
             }
 
-
+            // FIN DE get_area()
         }
-
-
-        // Ajustement de l'accumulation en fonction de la taille de cellule
-        // Pas pertinent à paralléliser car il risque d'y avoir ultimement plus de visites
-        // de cellules
-        if verbose {
-            println!("Adjust MFD to cell area...")
-        };
-        let cell_area = (resx * resy) as f32;
-        for row in 0..rows {
-            for col in 0..columns {
-                let z = dem.get_value(row, col);
-                if z != nodata {
-                    m_area.set_value(row, col, m_area.get_value(row, col) * cell_area);
-                }
-            }
-        }
-
-        // FIN DE get_area()
-
 
 
 
