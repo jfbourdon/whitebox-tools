@@ -86,6 +86,15 @@ impl BreachDepressions {
         });
 
         parameters.push(ToolParameter {
+            name: "Sink File".to_owned(),
+            flags: vec!["--sink".to_owned()],
+            description: "Sink raster file.".to_owned(),
+            parameter_type: ParameterType::ExistingFile(ParameterFileType::Raster),
+            default_value: None,
+            optional: false,
+        });
+
+        parameters.push(ToolParameter {
             name: "Flat increment value (z units)".to_owned(),
             flags: vec!["--flat_increment".to_owned()],
             description: "Optional elevation increment applied to flat areas.".to_owned(),
@@ -159,6 +168,7 @@ impl WhiteboxTool for BreachDepressions {
     ) -> Result<(), Error> {
         let mut input_file = String::new();
         let mut output_file = String::new();
+        let mut sink_file = String::new();
         let mut flat_increment = f64::NAN;
 
         if args.len() == 0 {
@@ -185,6 +195,12 @@ impl WhiteboxTool for BreachDepressions {
                 };
             } else if flag_val == "-o" || flag_val == "-output" {
                 output_file = if keyval {
+                    vec[1].to_string()
+                } else {
+                    args[i + 1].to_string()
+                };
+            } else if flag_val == "-sink" {
+                sink_file = if keyval {
                     vec[1].to_string()
                 } else {
                     args[i + 1].to_string()
@@ -232,6 +248,28 @@ impl WhiteboxTool for BreachDepressions {
         };
 
         let mut input = Raster::new(&input_file, "r")?;
+
+
+        let use_sink = !sink_file.is_empty();
+        if use_sink {
+            if !sink_file.contains(&sep) && !sink_file.contains("/") {
+                sink_file = format!("{}{}", working_directory, sink_file);
+            }
+        }
+
+        let sink: Array2D<f64> = match use_sink {
+            false => Array2D::new(1, 1, -9999_f64, -9999_f64)?,
+            true => {
+                // if verbose { println!("Reading watershed data...") };
+                let r = Raster::new(&sink_file, "r")?;
+                if r.configs.rows != input.configs.rows as usize || r.configs.columns != input.configs.columns as usize {
+                    return Err(Error::new(ErrorKind::InvalidInput,
+                                        "The input files must have the same number of rows and columns and spatial extent."));
+                }
+                r.get_data_as_array2d()
+            }
+        };
+
 
         let start = Instant::now();
         let rows = input.configs.rows as isize;
