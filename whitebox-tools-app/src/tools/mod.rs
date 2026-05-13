@@ -474,6 +474,7 @@ impl ToolManager {
         tool_names.push("MaximalCurvature".to_string());
         tool_names.push("MeanCurvature".to_string());
         tool_names.push("MinDownslopeElevChange".to_string());
+        tool_names.push("MinimumHeightBelowRidge".to_string());
         tool_names.push("MinimalCurvature".to_string());
         tool_names.push("MultidirectionalHillshade".to_string());
         tool_names.push("MultiscaleElevationPercentile".to_string());
@@ -1133,6 +1134,7 @@ impl ToolManager {
             "mindownslopeelevchange" => {
                 Some(Box::new(terrain_analysis::MinDownslopeElevChange::new()))
             }
+            "minimumheightbelowridge" => Some(Box::new(terrain_analysis::MinimumHeightBelowRidge::new())),
             "minimalcurvature" => Some(Box::new(terrain_analysis::MinimalCurvature::new())),
             "multidirectionalhillshade" => {
                 Some(Box::new(terrain_analysis::MultidirectionalHillshade::new()))
