@@ -24,11 +24,6 @@ use std::path;
 /// breaching algorithm described by Lindsay (2016). It uses a breach-first, fill-second
 /// approach to resolving continuous flowpaths through depressions.
 ///
-/// Notice that when the input DEM (`--dem`) contains deep, single-cell pits, it can be useful
-/// to raise the pits elevation to that of the lowest neighbour (`--fill_pits`), to avoid the
-/// creation of deep breach trenches. Deep pits can be common in DEMs containing speckle-type noise.
-/// This option, however, does add slightly to the computation time of the tool.
-///
 /// The user may optionally (`--flat_increment`) override the default value applied to increment elevations on
 /// flat areas (often formed by the subsequent depression filling operation). The default value is
 /// dependent upon the elevation range in the input DEM and is generally a very small elevation value (e.g.
@@ -91,39 +86,11 @@ impl BreachDepressions {
         });
 
         parameters.push(ToolParameter {
-            name: "Maximum Breach Depth (z units)".to_owned(),
-            flags: vec!["--max_depth".to_owned()],
-            description: "Optional maximum breach depth (default is Inf).".to_owned(),
-            parameter_type: ParameterType::Float,
-            default_value: None,
-            optional: true,
-        });
-
-        parameters.push(ToolParameter {
-            name: "Maximum Breach Channel Length (grid cells)".to_owned(),
-            flags: vec!["--max_length".to_owned()],
-            description: "Optional maximum breach channel length (in grid cells; default is Inf)."
-                .to_owned(),
-            parameter_type: ParameterType::Float,
-            default_value: None,
-            optional: true,
-        });
-
-        parameters.push(ToolParameter {
             name: "Flat increment value (z units)".to_owned(),
             flags: vec!["--flat_increment".to_owned()],
             description: "Optional elevation increment applied to flat areas.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: None,
-            optional: true,
-        });
-
-        parameters.push(ToolParameter {
-            name: "Fill single-cell pits?".to_owned(),
-            flags: vec!["--fill_pits".to_owned()],
-            description: "Optional flag indicating whether to fill single-cell pits.".to_owned(),
-            parameter_type: ParameterType::Boolean,
-            default_value: Some("false".to_string()),
             optional: true,
         });
 
@@ -192,11 +159,7 @@ impl WhiteboxTool for BreachDepressions {
     ) -> Result<(), Error> {
         let mut input_file = String::new();
         let mut output_file = String::new();
-        let mut max_depth = f64::INFINITY;
-        let mut max_length = f64::INFINITY;
-        let mut constrained_mode = false;
         let mut flat_increment = f64::NAN;
-        let mut fill_pits = false;
 
         if args.len() == 0 {
             return Err(Error::new(
@@ -226,32 +189,6 @@ impl WhiteboxTool for BreachDepressions {
                 } else {
                     args[i + 1].to_string()
                 };
-            } else if flag_val == "-max_depth" {
-                max_depth = if keyval {
-                    vec[1]
-                        .to_string()
-                        .parse::<f64>()
-                        .expect(&format!("Error parsing {}", flag_val))
-                } else {
-                    args[i + 1]
-                        .to_string()
-                        .parse::<f64>()
-                        .expect(&format!("Error parsing {}", flag_val))
-                };
-                constrained_mode = true;
-            } else if flag_val == "-max_length" {
-                max_length = if keyval {
-                    vec[1]
-                        .to_string()
-                        .parse::<f64>()
-                        .expect(&format!("Error parsing {}", flag_val))
-                } else {
-                    args[i + 1]
-                        .to_string()
-                        .parse::<f64>()
-                        .expect(&format!("Error parsing {}", flag_val))
-                };
-                constrained_mode = true;
             } else if flag_val == "-flat_increment" {
                 flat_increment = if keyval {
                     vec[1]
@@ -263,10 +200,6 @@ impl WhiteboxTool for BreachDepressions {
                         .to_string()
                         .parse::<f64>()
                         .expect(&format!("Error parsing {}", flag_val))
-                };
-            } else if flag_val == "-fill_pits" {
-                if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
-                    fill_pits = true;
                 }
             }
         }
@@ -298,10 +231,6 @@ impl WhiteboxTool for BreachDepressions {
             println!("Reading data...")
         };
 
-        if verbose && constrained_mode {
-            println!("Breaching in constrained mode...");
-        }
-
         let mut input = Raster::new(&input_file, "r")?;
 
         let start = Instant::now();
@@ -331,41 +260,6 @@ impl WhiteboxTool for BreachDepressions {
         let mut z_n: f64;
         let dx = [1, 1, 1, 0, -1, -1, -1, 0];
         let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
-        if fill_pits {
-            // Fill the single-cell pits before breaching. This can prevent the creation of
-            // very deep breach trenches.
-            let mut min_zn: f64;
-            let mut flag: bool;
-            for row in 1..rows - 1 {
-                for col in 1..columns - 1 {
-                    z = input.get_value(row, col);
-                    if z != nodata {
-                        flag = true;
-                        min_zn = f64::INFINITY;
-                        for n in 0..8 {
-                            z_n = input.get_value(row + dy[n], col + dx[n]);
-                            if z_n < min_zn && z_n != nodata {
-                                min_zn = z_n;
-                            }
-                            if z_n < z && z_n != nodata {
-                                flag = false;
-                                break;
-                            }
-                        }
-                        if flag {
-                            input.set_value(row, col, min_zn - small_num);
-                        }
-                    }
-                }
-                if verbose {
-                    progress = (100.0_f64 * row as f64 / (rows - 1) as f64) as usize;
-                    if progress != old_progress {
-                        println!("Filling pits: {}%", progress);
-                        old_progress = progress;
-                    }
-                }
-            }
-        }
 
 
         let mut flow_dir: Array2D<i8> = Array2D::new(rows, columns, -1, -1)?;
@@ -451,327 +345,81 @@ impl WhiteboxTool for BreachDepressions {
         let mut dir: i8;
         let mut flag: bool;
 
-        if !constrained_mode {
-            while !minheap.is_empty() {
-                let cell = minheap.pop().expect("Error during pop operation.");
-                row = cell.row;
-                col = cell.column;
-                zout = output.get_value(row, col);
-                for n in 0..8 {
-                    row_n = row + dy[n];
-                    col_n = col + dx[n];
-                    zout_n = output.get_value(row_n, col_n);
-                    if zout_n == background_val {
-                        zin_n = input.get_value(row_n, col_n);
-                        if zin_n != nodata {
-                            flow_dir.set_value(row_n, col_n, back_link[n]);
-                            output.set_value(row_n, col_n, zin_n);
-                            minheap.push(GridCell {
-                                row: row_n,
-                                column: col_n,
-                                priority: zin_n,
-                            });
-                            if zin_n < (zout + small_num) {
-                                // Trace the flowpath back to a lower cell, if it exists.
-                                x = col_n;
-                                y = row_n;
-                                z_target = output.get_value(row_n, col_n);
-                                flag = true;
-                                while flag {
-                                    dir = flow_dir[(y, x)];
-                                    if dir >= 0 {
-                                        y += dy[dir as usize];
-                                        x += dx[dir as usize];
-                                        z_target -= small_num;
-                                        if output.get_value(y, x) > z_target {
-                                            output.set_value(y, x, z_target);
-                                        } else {
-                                            flag = false;
-                                        }
-                                    } else {
-                                        flag = false;
-                                    }
-                                }
-                            }
-                        } else {
-                            // Interior nodata cells are still treated as nodata and are not filled.
-                            output.set_value(row_n, col_n, nodata);
-                            num_solved_cells += 1;
-                            // region growing operation to find all attached nodata cells
-                            queue.push_back((row_n, col_n));
-                            while !queue.is_empty() {
-                                let cell = queue.pop_front().unwrap();
-                                for n2 in 0..8 {
-                                    let row2 = cell.0 + dy[n2];
-                                    let col2 = cell.1 + dx[n2];
-                                    if input.get_value(row2, col2) == nodata
-                                        && output.get_value(row2, col2) == background_val
-                                    {
-                                        if row2 >= 0 && row2 < rows && col2 >= 0 && col2 < columns {
-                                            output.set_value(row2, col2, nodata);
-                                            num_solved_cells += 1;
-                                            queue.push_back((row2, col2));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
 
-                if verbose {
-                    num_solved_cells += 1;
-                    progress =
-                        (100.0_f64 * num_solved_cells as f64 / (num_cells - 1) as f64) as usize;
-                    if progress != old_progress {
-                        println!("Progress: {}%", progress);
-                        old_progress = progress;
-                    }
-                }
-            }
-        } else {
-            // constrained mode
-            let mut channel_depth: f64;
-            let mut channel_length: f64;
-            let mut carved_depth: f64;
-            let mut floodorder = Vec::with_capacity((rows * columns) as usize);
-            let mut unresolved_pits = false;
-            // let mut flood_order_tail = 0usize;
-            while !minheap.is_empty() {
-                let cell = minheap.pop().expect("Error during pop operation.");
-                row = cell.row;
-                col = cell.column;
-                floodorder.push(row * columns + col);
-                // flood_order_tail += 1;
-                zout = output.get_value(row, col);
-                for n in 0..8 {
-                    row_n = row + dy[n];
-                    col_n = col + dx[n];
-                    zout_n = output.get_value(row_n, col_n);
-                    if zout_n == background_val {
-                        zin_n = input.get_value(row_n, col_n);
-                        if zin_n != nodata {
-                            flow_dir.set_value(row_n, col_n, back_link[n]);
-                            output.set_value(row_n, col_n, zin_n);
-                            minheap.push(GridCell {
-                                row: row_n,
-                                column: col_n,
-                                priority: zin_n,
-                            });
-                            if zin_n < (zout + small_num) {
-                                // Trace the flowpath back to a lower cell, if it exists.
-                                x = col_n;
-                                y = row_n;
-                                z_target = output.get_value(row_n, col_n);
-                                channel_depth = 0.0;
-                                channel_length = 0.0;
-                                flag = true;
-                                while flag {
-                                    dir = flow_dir.get_value(y, x);
-                                    if dir >= 0 {
-                                        y += dy[dir as usize];
-                                        x += dx[dir as usize];
-                                        z_target -= small_num;
-                                        channel_length += 1.0;
-                                        if output.get_value(y, x) > z_target {
-                                            carved_depth = input.get_value(y, x) - z_target;
-                                            if carved_depth > channel_depth {
-                                                channel_depth = carved_depth;
-                                            }
-                                        } else {
-                                            flag = false;
-                                        }
+        while !minheap.is_empty() {
+            let cell = minheap.pop().expect("Error during pop operation.");
+            row = cell.row;
+            col = cell.column;
+            zout = output.get_value(row, col);
+            for n in 0..8 {
+                row_n = row + dy[n];
+                col_n = col + dx[n];
+                zout_n = output.get_value(row_n, col_n);
+                if zout_n == background_val {
+                    zin_n = input.get_value(row_n, col_n);
+                    if zin_n != nodata {
+                        flow_dir.set_value(row_n, col_n, back_link[n]);
+                        output.set_value(row_n, col_n, zin_n);
+                        minheap.push(GridCell {
+                            row: row_n,
+                            column: col_n,
+                            priority: zin_n,
+                        });
+                        if zin_n < (zout + small_num) {
+                            // Trace the flowpath back to a lower cell, if it exists.
+                            x = col_n;
+                            y = row_n;
+                            z_target = output.get_value(row_n, col_n);
+                            flag = true;
+                            while flag {
+                                dir = flow_dir[(y, x)];
+                                if dir >= 0 {
+                                    y += dy[dir as usize];
+                                    x += dx[dir as usize];
+                                    z_target -= small_num;
+                                    if output.get_value(y, x) > z_target {
+                                        output.set_value(y, x, z_target);
                                     } else {
                                         flag = false;
-                                    }
-                                }
-                                if channel_depth < max_depth && channel_length < max_length {
-                                    // It's okay to breach it.
-                                    x = col_n;
-                                    y = row_n;
-                                    z_target = output.get_value(row_n, col_n);
-                                    flag = true;
-                                    while flag {
-                                        dir = flow_dir.get_value(y, x);
-                                        if dir >= 0 {
-                                            y += dy[dir as usize];
-                                            x += dx[dir as usize];
-                                            z_target -= small_num;
-                                            if output.get_value(y, x) > z_target {
-                                                output.set_value(y, x, z_target);
-                                            } else {
-                                                flag = false;
-                                            }
-                                        } else {
-                                            flag = false;
-                                        }
                                     }
                                 } else {
-                                    // let optimal_search = max_length.round() as isize;
-                                    // let optimal_filter_size = 2 * optimal_search + 1;
-                                    // let (mut j, mut k): (isize, isize);
-                                    // let large_value = f64::MAX;
-                                    // let mut zn: f64;
-                                    // let (mut cost1, mut cost2, mut new_cost): (f64, f64, f64);
-                                    // let mut accum_val: f64;
-                                    // let mut cost: Array2D<f64> = Array2D::new(optimal_filter_size, optimal_filter_size, f64::MAX, nodata)?;
-                                    // let mut accumulatedcost: Array2D<f64> = Array2D::new(optimal_filter_size, optimal_filter_size, f64::MAX, nodata)?;
-                                    // let mut backlink: Array2D<i8> = Array2D::new(optimal_filter_size, optimal_filter_size, -1, -1)?;
-                                    // let mut solved: Array2D<i8> = Array2D::new(optimal_filter_size, optimal_filter_size, 0, -1)?;
-                                    // let mut costheap = BinaryHeap::with_capacity((optimal_filter_size * optimal_filter_size) as usize);
-                                    // let cell_size_x = input.configs.resolution_x;
-                                    // let cell_size_y = input.configs.resolution_y;
-                                    // let diag_cell_size = (cell_size_x * cell_size_x + cell_size_y * cell_size_y).sqrt();
-                                    // let dist = [
-                                    //     diag_cell_size,
-                                    //     cell_size_x,
-                                    //     diag_cell_size,
-                                    //     cell_size_y,
-                                    //     diag_cell_size,
-                                    //     cell_size_x,
-                                    //     diag_cell_size,
-                                    //     cell_size_y,
-                                    // ];
-                                    // for row_offset in -optimal_search..=optimal_search {
-                                    //     for col_offset in -optimal_search..=optimal_search {
-                                    //         zn = output.get_value(row_n + row_offset, col_n + col_offset);
-                                    //         j = row_offset + optimal_search;
-                                    //         k = col_offset + optimal_search;
-                                    //         if zn < zout && zn != nodata && zn != background_val {
-                                    //             cost.set_value(j, k, 0f64);
-                                    //             accumulatedcost.set_value(j, k, 0f64);
-                                    //             costheap.push(GridCell {
-                                    //                 row: j,
-                                    //                 column: k,
-                                    //                 priority: 0f64,
-                                    //             });
-                                    //             // backlink.set_value(j, k, 0);
-                                    //         } else if zn >= zout {
-                                    //             cost1 = zn - zout;
-                                    //             if cost1 < max_depth {
-                                    //                 cost.set_value(j, k, zn - zout);
-                                    //             } else {
-                                    //                 cost.set_value(j, k, large_value);
-                                    //             }
-                                    //             accumulatedcost.set_value(j, k, large_value);
-                                    //         } else { // nodata, background cell, or lower but not yet flooded.
-                                    //             cost.set_value(j, k, nodata);
-                                    //             accumulatedcost.set_value(j, k, nodata);
-                                    //             solved.set_value(j, k, 1);
-                                    //         }
-                                    //     }
-                                    // }
-                                    // if !costheap.is_empty() {
-                                    //     // println!("I'm here");
-                                    //     while !costheap.is_empty() {
-                                    //         let cell = costheap.pop().expect("Error during pop operation.");
-                                    //         if solved.get_value(cell.row, cell.column) == 0 {
-                                    //             solved.set_value(cell.row, cell.column, 1);
-                                    //             accum_val = accumulatedcost.get_value(cell.row, cell.column);
-                                    //             cost1 = cost.get_value(cell.row, cell.column);
-                                    //             for n in 0..8 {
-                                    //                 j = cell.row + dy[n];
-                                    //                 k = cell.column + dx[n];
-                                    //                 if accumulatedcost.get_value(j, k) != nodata {
-                                    //                     cost2 = cost.get_value(j, k);
-                                    //                     new_cost = accum_val + (cost1 + cost2) / 2.0 * dist[n];
-                                    //                     if new_cost < accumulatedcost.get_value(j, k) {
-                                    //                         if solved.get_value(j, k) == 0 {
-                                    //                             accumulatedcost.set_value(j, k, new_cost);
-                                    //                             backlink.set_value(j, k, back_link[n]);
-                                    //                             costheap.push(GridCell {
-                                    //                                 row: j,
-                                    //                                 column: k,
-                                    //                                 priority: new_cost,
-                                    //                             });
-                                    //                         }
-                                    //                     }
-                                    //                 }
-                                    //             }
-                                    //         }
-                                    //     }
-                                    //     // now trace the path from row, col to the nearest source, carving the breach path.
-                                    //     j = row;
-                                    //     k = col;
-                                    //     let mut flag = true;
-                                    //     while flag {
-
-                                    //     }
-                                    // } else {
-                                    unresolved_pits = true;
-                                    // }
+                                    flag = false;
                                 }
                             }
-                        } else {
-                            // Interior nodata cells are still treated as nodata and are not filled.
-                            output.set_value(row_n, col_n, nodata);
-                            num_solved_cells += 1;
-                            // region growing operation to find all attached nodata cells
-                            queue.push_back((row_n, col_n));
-                            while !queue.is_empty() {
-                                let cell = queue.pop_front().unwrap();
-                                for n2 in 0..8 {
-                                    let row2 = cell.0 + dy[n2];
-                                    let col2 = cell.1 + dx[n2];
-                                    if input.get_value(row2, col2) == nodata
-                                        && output.get_value(row2, col2) == background_val
-                                    {
-                                        if row2 >= 0 && row2 < rows && col2 >= 0 && col2 < columns {
-                                            output.set_value(row2, col2, nodata);
-                                            num_solved_cells += 1;
-                                            queue.push_back((row2, col2));
-                                        }
+                        }
+                    } else {
+                        // Interior nodata cells are still treated as nodata and are not filled.
+                        output.set_value(row_n, col_n, nodata);
+                        num_solved_cells += 1;
+                        // region growing operation to find all attached nodata cells
+                        queue.push_back((row_n, col_n));
+                        while !queue.is_empty() {
+                            let cell = queue.pop_front().unwrap();
+                            for n2 in 0..8 {
+                                let row2 = cell.0 + dy[n2];
+                                let col2 = cell.1 + dx[n2];
+                                if input.get_value(row2, col2) == nodata
+                                    && output.get_value(row2, col2) == background_val
+                                {
+                                    if row2 >= 0 && row2 < rows && col2 >= 0 && col2 < columns {
+                                        output.set_value(row2, col2, nodata);
+                                        num_solved_cells += 1;
+                                        queue.push_back((row2, col2));
                                     }
                                 }
                             }
                         }
                     }
                 }
-
-                if verbose {
-                    num_solved_cells += 1;
-                    progress =
-                        (100.0_f64 * num_solved_cells as f64 / (num_cells - 1) as f64) as usize;
-                    if progress != old_progress {
-                        println!("Progress: {}%", progress);
-                        old_progress = progress;
-                    }
-                }
             }
 
-            // if unresolved_pits && verbose {
-            //     println!("There were unbreached depressions. The result should be filled to remove additional depressions.");
-            // }
-            if unresolved_pits {
-                // Fill the DEM.
-                num_solved_cells = 0;
-                let num_valid_cells = floodorder.len();
-                for c in 0..num_valid_cells {
-                    row = floodorder[c] / columns;
-                    col = floodorder[c] % columns;
-                    if row >= 0 && col >= 0 {
-                        z = output.get_value(row, col);
-                        dir = flow_dir.get_value(row, col);
-                        if dir >= 0 {
-                            row_n = row + dy[dir as usize];
-                            col_n = col + dx[dir as usize];
-                            z_n = output.get_value(row_n, col_n);
-                            if z_n != nodata {
-                                if z <= z_n + small_num {
-                                    output.set_value(row, col, z_n + small_num);
-                                }
-                            }
-                        }
-                    }
-                    if verbose {
-                        num_solved_cells += 1;
-                        progress =
-                            (100.0_f64 * num_solved_cells as f64 / (num_cells - 1) as f64) as usize;
-                        if progress != old_progress {
-                            println!("Filling DEM: {}%", progress);
-                            old_progress = progress;
-                        }
-                    }
+            if verbose {
+                num_solved_cells += 1;
+                progress =
+                    (100.0_f64 * num_solved_cells as f64 / (num_cells - 1) as f64) as usize;
+                if progress != old_progress {
+                    println!("Progress: {}%", progress);
+                    old_progress = progress;
                 }
             }
         }
@@ -784,11 +432,6 @@ impl WhiteboxTool for BreachDepressions {
             self.get_tool_name()
         ));
         output.add_metadata_entry(format!("Input file: {}", input_file));
-        output.add_metadata_entry(format!("Fill pits: {}", fill_pits));
-        if constrained_mode {
-            output.add_metadata_entry(format!("Maximum breach depth: {}", max_depth));
-            output.add_metadata_entry(format!("Maximum breach channel length: {}", max_length));
-        }
         output.add_metadata_entry(format!("Flat elevation increment: {}", small_num));
         output.add_metadata_entry(format!("Elapsed Time (excluding I/O): {}", elapsed_time));
 
