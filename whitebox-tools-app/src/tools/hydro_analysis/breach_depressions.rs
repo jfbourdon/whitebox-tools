@@ -408,21 +408,17 @@ impl WhiteboxTool for BreachDepressions {
                             x = col_n;
                             y = row_n;
                             z_target = output.get_value(row_n, col_n);
-                            flag = true;
-                            while flag {
-                                dir = flow_dir[(y, x)];
-                                if dir >= 0 {
-                                    y += dy[dir as usize];
-                                    x += dx[dir as usize];
-                                    z_target -= small_num;
-                                    if output.get_value(y, x) > z_target {
-                                        output.set_value(y, x, z_target);
-                                    } else {
-                                        flag = false;
-                                    }
+                            dir = flow_dir[(y, x)];
+                            while dir >= 0 {
+                                y += dy[dir as usize];
+                                x += dx[dir as usize];
+                                z_target -= small_num;
+                                if output.get_value(y, x) > z_target {
+                                    output.set_value(y, x, z_target);
                                 } else {
-                                    flag = false;
+                                    break;
                                 }
+                                dir = flow_dir[(y, x)];
                             }
                         }
                     } else {
