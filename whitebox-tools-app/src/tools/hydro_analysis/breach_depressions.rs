@@ -421,28 +421,6 @@ impl WhiteboxTool for BreachDepressions {
                                 dir = flow_dir[(y, x)];
                             }
                         }
-                    } else {
-                        // Interior nodata cells are still treated as nodata and are not filled.
-                        output.set_value(row_n, col_n, nodata);
-                        num_solved_cells += 1;
-                        // region growing operation to find all attached nodata cells
-                        queue.push_back((row_n, col_n));
-                        while !queue.is_empty() {
-                            let cell = queue.pop_front().unwrap();
-                            for n2 in 0..8 {
-                                let row2 = cell.0 + dy[n2];
-                                let col2 = cell.1 + dx[n2];
-                                if input.get_value(row2, col2) == nodata
-                                    && output.get_value(row2, col2) == background_val
-                                {
-                                    if row2 >= 0 && row2 < rows && col2 >= 0 && col2 < columns {
-                                        output.set_value(row2, col2, nodata);
-                                        num_solved_cells += 1;
-                                        queue.push_back((row2, col2));
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }
