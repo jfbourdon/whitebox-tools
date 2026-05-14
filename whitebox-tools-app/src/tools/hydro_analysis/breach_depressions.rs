@@ -376,6 +376,30 @@ impl WhiteboxTool for BreachDepressions {
             }
         }
 
+
+
+
+        // Recherche dans la matrice de sink des pixels valides et les ajoute au "minheap"
+        let sink_nodata = sink.nodata;
+        for row in 0..rows {
+            for col in 0..columns {
+                let z = sink.get_value(row, col);
+                if z != sink_nodata {
+                    input.set_value(row, col, z);
+                    output.set_value(row, col, z);
+                    // Push it onto the priority queue for the priority flood operation
+                    minheap.push(GridCell {
+                        row: row,
+                        column: col,
+                        priority: z,
+                    });
+                }
+            }
+        }
+
+
+
+
         // Perform the priority flood operation.
         let back_link = [4i8, 5i8, 6i8, 7i8, 0i8, 1i8, 2i8, 3i8];
         let (mut x, mut y): (isize, isize);
