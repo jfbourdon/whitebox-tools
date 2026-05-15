@@ -29,7 +29,7 @@ use std::thread;
 /// algorithm with efficiency optimizations and other significant enhancements. The approach uses a least-cost
 /// path analysis to identify the breach channel that connects pit cells (i.e. grid cells for
 /// which there is no lower neighbour) to some distant lower cell. Prior to breaching and in order
-/// to minimize the depth of breach channels, all pit cells are rised to the elevation of the lowest
+/// to minimize the depth of breach channels, all pit cells can be rised (`--raise_pits`) to the elevation of the lowest
 /// neighbour minus a small heigh value. Here, the cost of a breach path is determined by the amount
 /// of elevation lowering needed to cut the breach channel through the surrounding topography.
 ///
@@ -158,6 +158,16 @@ impl BreachDepressionsLeastCost {
         });
 
         parameters.push(ToolParameter {
+            name: "Raise pits?".to_owned(),
+            flags: vec!["--raise_pits".to_owned()],
+            description: "Optional flag indicating whether to raise pits."
+                .to_owned(),
+            parameter_type: ParameterType::Boolean,
+            default_value: Some("false".to_string()),
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
             name: "Flat increment value (z units)".to_owned(),
             flags: vec!["--flat_increment".to_owned()],
             description: "Optional elevation increment applied to flat areas.".to_owned(),
@@ -247,6 +257,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let mut flat_increment = f64::NAN;
         let mut fill_deps = false;
         let mut minimize_dist = false;
+        let mut raise_pits = false;
 
         if args.len() == 0 {
             return Err(Error::new(
@@ -309,6 +320,10 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
             } else if flag_val == "-min_dist" {
                 if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
                     minimize_dist = true;
+                }
+            } else if flag_val == "-raise_pits" {
+                if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
+                    raise_pits = true;
                 }
             } else if flag_val == "-fill" {
                 if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
@@ -426,7 +441,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                                 }
                             }
                             if flag {
-                                data[col as usize] = min_zn - small_num;
+                                if raise_pits { data[col as usize] = min_zn - small_num; }
                                 pits.push((row, col, z));
                             }
                         }
