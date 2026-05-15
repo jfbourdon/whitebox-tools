@@ -252,6 +252,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
     ) -> Result<(), Error> {
         let mut input_file = String::new();
         let mut output_file = String::new();
+        let mut sink_file = String::new();
         let mut max_cost = f64::INFINITY;
         let mut max_dist = 20isize;
         let mut flat_increment = f64::NAN;
@@ -283,6 +284,12 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                 };
             } else if flag_val == "-o" || flag_val == "-output" {
                 output_file = if keyval {
+                    vec[1].to_string()
+                } else {
+                    args[i + 1].to_string()
+                };
+            } else if flag_val == "-sink" {
+                sink_file = if keyval {
                     vec[1].to_string()
                 } else {
                     args[i + 1].to_string()
@@ -360,6 +367,28 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         };
 
         let input = Arc::new(Raster::new(&input_file, "r").expect("Error reading input raster"));
+
+
+        let use_sink = !sink_file.is_empty();
+        if use_sink {
+            if !sink_file.contains(&sep) && !sink_file.contains("/") {
+                sink_file = format!("{}{}", working_directory, sink_file);
+            }
+        }
+
+        let sink: Array2D<f64> = match use_sink {
+            false => Array2D::new(1, 1, -9999_f64, -9999_f64)?,
+            true => {
+                // if verbose { println!("Reading watershed data...") };
+                let r = Raster::new(&sink_file, "r")?;
+                if r.configs.rows != input.configs.rows as usize || r.configs.columns != input.configs.columns as usize {
+                    return Err(Error::new(ErrorKind::InvalidInput,
+                                        "The input files must have the same number of rows and columns and spatial extent."));
+                }
+                r.get_data_as_array2d()
+            }
+        };
+
 
         let start = Instant::now();
 
@@ -491,10 +520,18 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let mut scanned_cells = vec![];
         let max_length = max_dist as i16;
         let filter_size = ((max_dist * 2 + 1) * (max_dist * 2 + 1)) as usize;
+        let sink_nodata = sink.nodata;
         let mut minheap = BinaryHeap::with_capacity(filter_size);
         while let Some(cell) = undefined_flow_cells.pop() {
             row = cell.0;
             col = cell.1;
+
+
+            // Skip breachink cell if it represent a true sink in the provided sink raster
+            let val = sink.get_value(row, col);
+            if val != sink_nodata { continue }
+
+
             z = output.get_value(row, col);
 
             // Is it still a pit cell? It may have been solved during a previous depression solution.
