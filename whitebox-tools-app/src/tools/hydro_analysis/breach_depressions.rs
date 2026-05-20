@@ -383,9 +383,9 @@ impl WhiteboxTool for BreachDepressions {
         let sink_nodata = sink.nodata;
         for row in 0..rows {
             for col in 0..columns {
-                let z = sink.get_value(row, col);
-                if z != sink_nodata {
-                    input.set_value(row, col, z);
+                let val = sink.get_value(row, col);
+                if val > 0_f64 && val != sink_nodata{
+                    let z = input.get_value(row, col);
                     output.set_value(row, col, z);
                     // Push it onto the priority queue for the priority flood operation
                     minheap.push(GridCell {

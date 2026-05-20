@@ -527,9 +527,9 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
             col = cell.1;
 
 
-            // Skip breachink cell if it represent a true sink in the provided sink raster
+            // Skip breaching cell if it represents a true sink in the provided sink raster
             let val = sink.get_value(row, col);
-            if val != sink_nodata { continue }
+            if val > 0_f64 && val != sink_nodata { continue }
 
 
             z = output.get_value(row, col);
