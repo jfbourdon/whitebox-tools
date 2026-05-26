@@ -151,6 +151,15 @@ impl WetnessIndexBoehnerAndConrad {
         });
 
         parameters.push(ToolParameter {
+            name: "Run as SAGA 7.3.0?".to_owned(),
+            flags: vec!["--saga730".to_owned()],
+            description: "Optional flag indicating whether to run as SAGA 7.3.0.".to_owned(),
+            parameter_type: ParameterType::Boolean,
+            default_value: Some("false".to_string()),
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
             name: "Output File".to_owned(),
             flags: vec!["-o".to_owned(), "--output".to_owned()],
             description: "Output raster file.".to_owned(),
@@ -235,6 +244,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         let mut slope_min = 0_f32;
         let mut slope_offset = 0.1_f32;
         let mut mfd_convergence = 1.1_f64;
+        let mut saga_730 = false;
 
 
         if args.len() == 0 {
@@ -363,6 +373,11 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
                         .to_string()
                         .parse::<f64>()
                         .expect(&format!("Error parsing {}", flag_val))
+                }
+
+            } else if flag_val == "-saga730" {
+                if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
+                    saga_730 = true;
                 };
             }
         }
@@ -605,7 +620,7 @@ impl WhiteboxTool for WetnessIndexBoehnerAndConrad {
         };
         let mut twi = Raster::initialize_using_file(&output_file, &dem);
         twi.configs.data_type = DataType::F32;
-        get_twi(&mut twi, m_amod, m_slope, dem, area_type, slope_type, slope_min, slope_offset);
+        get_twi(&mut twi, m_amod, m_slope, dem, area_type, slope_type, slope_min, slope_offset, saga_730);
 
 
 
@@ -786,7 +801,7 @@ fn get_local_maximum<'a>(m_grid: &'a Array2D<f32>, row: isize, col: isize) -> f3
 }
 
 
-fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>, dem: Arc<Raster>, area_type: isize, slope_type: isize, slope_min: f32, slope_offset: f32) {
+fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>, dem: Arc<Raster>, area_type: isize, slope_type: isize, slope_min: f32, slope_offset: f32, saga_730: bool) {
     let rows = dem.configs.rows as isize;
     let columns = dem.configs.columns as isize;
     let nodata = dem.configs.nodata;
@@ -795,6 +810,7 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
 
     let slope_min_rad = slope_min.to_radians();
     let slope_offset_rad = slope_offset.to_radians();
+    let bug_factor= if saga_730 {6f32} else {1f32};
 
     let (tx, rx) = mpsc::channel();
     for tid in 0..num_procs {
@@ -824,7 +840,7 @@ fn get_twi<'a>(twi: &'a mut Raster, m_amod: Array2D<f32>, m_slope: Array2D<f32>,
                             _ => panic!("Invalid 'area_type' parameter"),
                         };
         
-                        vec_twi[col as usize] = (area / slope).ln() as f64;
+                        vec_twi[col as usize] = (area / (slope * bug_factor)).ln() as f64;
                     }
                 }
                 tx.send((row, vec_twi)).unwrap();
