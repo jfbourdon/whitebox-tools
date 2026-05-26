@@ -69,6 +69,7 @@ mod total_curvature;
 mod viewshed;
 mod visibility_index;
 mod wetness_index;
+mod wetness_index_boehner_and_conrad;
 
 // exports identifiers from private sub-modules in the current module namespace
 pub use self::aspect::Aspect;
@@ -141,3 +142,4 @@ pub use self::total_curvature::TotalCurvature;
 pub use self::viewshed::Viewshed;
 pub use self::visibility_index::VisibilityIndex;
 pub use self::wetness_index::WetnessIndex;
+pub use self::wetness_index_boehner_and_conrad::WetnessIndexBoehnerAndConrad;
