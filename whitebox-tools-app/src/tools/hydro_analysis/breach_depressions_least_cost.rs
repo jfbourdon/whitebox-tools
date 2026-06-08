@@ -30,8 +30,9 @@ use std::thread;
 /// path analysis to identify the breach channel that connects pit cells (i.e. grid cells for
 /// which there is no lower neighbour) to some distant lower cell. Prior to breaching and in order
 /// to minimize the depth of breach channels, all pit cells are rised to the elevation of the lowest
-/// neighbour minus a small heigh value. Here, the cost of a breach path is determined by the amount
-/// of elevation lowering needed to cut the breach channel through the surrounding topography.
+/// neighbour minus a small heigh value. This behavior can be disabled by using the `--keep_pits` flag.
+/// Here, the cost of a breach path is determined by the amount of elevation lowering needed to cut
+/// the breach channel through the surrounding topography.
 ///
 /// The user must specify the name of the input DEM file (`--dem`), the output breached DEM
 /// file (`--output`), the maximum search window radius (`--dist`), the optional maximum breach
@@ -158,6 +159,16 @@ impl BreachDepressionsLeastCost {
         });
 
         parameters.push(ToolParameter {
+            name: "Keep pits?".to_owned(),
+            flags: vec!["--keep_pits".to_owned()],
+            description: "Optional flag indicating whether to keep pits."
+                .to_owned(),
+            parameter_type: ParameterType::Boolean,
+            default_value: Some("false".to_string()),
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
             name: "Flat increment value (z units)".to_owned(),
             flags: vec!["--flat_increment".to_owned()],
             description: "Optional elevation increment applied to flat areas.".to_owned(),
@@ -242,11 +253,13 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
     ) -> Result<(), Error> {
         let mut input_file = String::new();
         let mut output_file = String::new();
+        let mut sink_file = String::new();
         let mut max_cost = f64::INFINITY;
         let mut max_dist = 20isize;
         let mut flat_increment = f64::NAN;
         let mut fill_deps = false;
         let mut minimize_dist = false;
+        let mut keep_pits = false;
 
         if args.len() == 0 {
             return Err(Error::new(
@@ -272,6 +285,12 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                 };
             } else if flag_val == "-o" || flag_val == "-output" {
                 output_file = if keyval {
+                    vec[1].to_string()
+                } else {
+                    args[i + 1].to_string()
+                };
+            } else if flag_val == "-sink" {
+                sink_file = if keyval {
                     vec[1].to_string()
                 } else {
                     args[i + 1].to_string()
@@ -310,6 +329,10 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                 if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
                     minimize_dist = true;
                 }
+            } else if flag_val == "-keep_pits" {
+                if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
+                    keep_pits = true;
+                }
             } else if flag_val == "-fill" {
                 if vec.len() == 1 || !vec[1].to_string().to_lowercase().contains("false") {
                     fill_deps = true;
@@ -345,6 +368,28 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         };
 
         let input = Arc::new(Raster::new(&input_file, "r").expect("Error reading input raster"));
+
+
+        let use_sink = !sink_file.is_empty();
+        if use_sink {
+            if !sink_file.contains(&sep) && !sink_file.contains("/") {
+                sink_file = format!("{}{}", working_directory, sink_file);
+            }
+        }
+
+        let sink: Array2D<f64> = match use_sink {
+            false => Array2D::new(1, 1, -9999_f64, -9999_f64)?,
+            true => {
+                // if verbose { println!("Reading watershed data...") };
+                let r = Raster::new(&sink_file, "r")?;
+                if r.configs.rows != input.configs.rows as usize || r.configs.columns != input.configs.columns as usize {
+                    return Err(Error::new(ErrorKind::InvalidInput,
+                                        "The input files must have the same number of rows and columns and spatial extent."));
+                }
+                r.get_data_as_array2d()
+            }
+        };
+
 
         let start = Instant::now();
 
@@ -426,7 +471,7 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
                                 }
                             }
                             if flag {
-                                data[col as usize] = min_zn - small_num;
+                                if !keep_pits { data[col as usize] = min_zn - small_num; }
                                 pits.push((row, col, z));
                             }
                         }
@@ -476,10 +521,18 @@ impl WhiteboxTool for BreachDepressionsLeastCost {
         let mut scanned_cells = vec![];
         let max_length = max_dist as i16;
         let filter_size = ((max_dist * 2 + 1) * (max_dist * 2 + 1)) as usize;
+        let sink_nodata = sink.nodata;
         let mut minheap = BinaryHeap::with_capacity(filter_size);
         while let Some(cell) = undefined_flow_cells.pop() {
             row = cell.0;
             col = cell.1;
+
+
+            // Skip breaching cell if it represents a true sink in the provided sink raster
+            let val = sink.get_value(row, col);
+            if val > 0_f64 && val != sink_nodata { continue }
+
+
             z = output.get_value(row, col);
 
             // Is it still a pit cell? It may have been solved during a previous depression solution.
