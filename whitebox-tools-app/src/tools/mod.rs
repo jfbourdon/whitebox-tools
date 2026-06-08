@@ -157,6 +157,7 @@ impl ToolManager {
         tool_names.push("AverageUpslopeFlowpathLength".to_string());
         tool_names.push("Basins".to_string());
         tool_names.push("BreachDepressions".to_string());
+        tool_names.push("BreachDepressionsSinks".to_string());
         tool_names.push("BreachDepressionsLeastCost".to_string());
         tool_names.push("BreachSingleCellPits".to_string());
         tool_names.push("BurnStreams".to_string());
@@ -680,6 +681,7 @@ impl ToolManager {
             }
             "basins" => Some(Box::new(hydro_analysis::Basins::new())),
             "breachdepressions" => Some(Box::new(hydro_analysis::BreachDepressions::new())),
+            "breachdepressionssinks" => Some(Box::new(hydro_analysis::BreachDepressionsSinks::new())),
             "breachdepressionsleastcost" => {
                 Some(Box::new(hydro_analysis::BreachDepressionsLeastCost::new()))
             }
