@@ -97,6 +97,15 @@ impl Viewshed {
             optional: false,
         });
 
+        parameters.push(ToolParameter {
+            name: "Maximum viewing distance (in horizontal units)".to_owned(),
+            flags: vec!["--max_dist".to_owned()],
+            description: "Optional maximum viewing distance, in horizontal units.".to_owned(),
+            parameter_type: ParameterType::Float,
+            default_value: None,
+            optional: true,
+        });
+
         let sep: String = path::MAIN_SEPARATOR.to_string();
         let e = format!("{}", env::current_exe().unwrap().display());
         let mut parent = env::current_exe().unwrap();
@@ -167,6 +176,7 @@ impl WhiteboxTool for Viewshed {
         let mut stations_file = String::new();
         let mut output_file = String::new();
         let mut height = 2.0;
+        let mut max_dist = f64::INFINITY;
 
         if args.len() == 0 {
             return Err(Error::new(
@@ -214,7 +224,20 @@ impl WhiteboxTool for Viewshed {
                         .parse::<f64>()
                         .expect(&format!("Error parsing {}", flag_val))
                 };
+            } else if flag_val == "-max_dist" {
+                max_dist = if keyval {
+                    vec[1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                } else {
+                    args[i + 1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                }
             }
+
         }
 
         if verbose {
@@ -262,9 +285,16 @@ impl WhiteboxTool for Viewshed {
             height = 0f64;
         }
 
+        if max_dist < 0f64 {
+            println!("Warning: Maximum viewing distance cannot be less than zero.");
+            max_dist = f64::INFINITY;
+        }
+
         let rows = dem.configs.rows as isize;
         let columns = dem.configs.columns as isize;
         let nodata = dem.configs.nodata;
+        let xres = dem.configs.resolution_x;
+        let yres = dem.configs.resolution_y;
 
         // let stations = Arc::new(Raster::new(&stations_file, "r")?);
         // let stations = Raster::new(&stations_file, "r")?;
@@ -323,6 +353,9 @@ impl WhiteboxTool for Viewshed {
         let mut view_angle: Array2D<f32> = Array2D::new(rows, columns, -32768f32, -32768f32)?;
         let mut stn_num = 0;
         let num_stn = station_x.len();
+        let xcells_dist = (max_dist / xres).ceil() as isize;
+        let ycells_dist = (max_dist / yres).ceil() as isize;
+
         while !station_x.is_empty() {
             stn_num += 1;
             println!("Station {} of {}", stn_num, num_stn);
@@ -340,6 +373,15 @@ impl WhiteboxTool for Viewshed {
                 ));
             }
 
+
+            // Locate bounds of viewshed analysis based on the maximum viewing distance
+            // in order to minimise the number of cells for which computation will be done
+            let row_min = (stn_row - ycells_dist).max(0_isize);
+            let row_max = (stn_row + ycells_dist).min(rows);
+            let col_min = (stn_col - xcells_dist).max(0_isize);
+            let col_max = (stn_col + xcells_dist).min(columns);
+
+
             // now calculate the view angle
             let (tx, rx) = mpsc::channel();
             for tid in 0..num_procs {
@@ -350,9 +392,9 @@ impl WhiteboxTool for Viewshed {
                     let mut z: f64;
                     let mut dz: f64;
                     let mut dist: f64;
-                    for row in (0..rows).filter(|r| r % num_procs == tid) {
+                    for row in (row_min..row_max).filter(|r| r % num_procs == tid) {
                         let mut data: Vec<f32> = vec![-32768f32; columns as usize];
-                        for col in 0..columns {
+                        for col in col_min..col_max {
                             z = dem.get_value(row, col);
                             if z != nodata {
                                 x = dem.get_x_from_column(col);
@@ -372,20 +414,20 @@ impl WhiteboxTool for Viewshed {
                 });
             }
 
-            for r in 0..rows {
+            for r in row_min..row_max {
                 let (row, data) = rx.recv().expect("Error receiving data from thread.");
                 view_angle.set_row_data(row, data);
 
-                if verbose {
-                    progress = (100.0_f64 * r as f64 / (rows - 1) as f64) as usize;
-                    if progress != old_progress {
-                        println!(
-                            "Calculating view angle (Station {} of {}): {}%",
-                            stn_num, num_stn, progress
-                        );
-                        old_progress = progress;
-                    }
-                }
+                //if verbose {
+                //    progress = (100.0_f64 * r as f64 / (rows - 1) as f64) as usize;
+                //    if progress != old_progress {
+                //        println!(
+                //            "Calculating view angle (Station {} of {}): {}%",
+                //            stn_num, num_stn, progress
+                //        );
+                //        old_progress = progress;
+                //    }
+                //}
             }
 
             let mut max_view_angle: Array2D<f32> =
@@ -401,7 +443,7 @@ impl WhiteboxTool for Viewshed {
             }
 
             let mut max_va = view_angle.get_value(stn_row - 1, stn_col);
-            for row in (0..stn_row - 1).rev() {
+            for row in (row_min..stn_row - 1).rev() {
                 z = view_angle.get_value(row, stn_col);
                 if z > max_va {
                     max_va = z;
@@ -410,7 +452,7 @@ impl WhiteboxTool for Viewshed {
             }
 
             max_va = view_angle.get_value(stn_row + 1, stn_col);
-            for row in stn_row + 2..rows {
+            for row in stn_row + 2..row_max {
                 z = view_angle.get_value(row, stn_col);
                 if z > max_va {
                     max_va = z;
@@ -419,7 +461,7 @@ impl WhiteboxTool for Viewshed {
             }
 
             max_va = view_angle.get_value(stn_row, stn_col + 1);
-            for col in stn_col + 2..columns {
+            for col in stn_col + 2..col_max {
                 z = view_angle.get_value(stn_row, col);
                 if z > max_va {
                     max_va = z;
@@ -428,7 +470,7 @@ impl WhiteboxTool for Viewshed {
             }
 
             max_va = view_angle.get_value(stn_row, stn_col - 1);
-            for col in (0..stn_col - 1).rev() {
+            for col in (col_min..stn_col - 1).rev() {
                 z = view_angle.get_value(stn_row, col);
                 if z > max_va {
                     max_va = z;
@@ -443,11 +485,11 @@ impl WhiteboxTool for Viewshed {
             let mut t2: f32;
             let mut vert_count = 1f32;
             let mut horiz_count: f32;
-            for row in (0..stn_row - 1).rev() {
+            for row in (row_min..stn_row - 1).rev() {
                 vert_count += 1f32;
                 horiz_count = 0f32;
                 for col in stn_col + 1..stn_col + (vert_count as isize) + 1 {
-                    if col <= columns {
+                    if col <= col_max {
                         va = view_angle.get_value(row, col);
                         horiz_count += 1f32;
                         if horiz_count != vert_count {
@@ -470,11 +512,11 @@ impl WhiteboxTool for Viewshed {
 
             //solve the second triangular facet
             vert_count = 1f32;
-            for row in (0..stn_row - 1).rev() {
+            for row in (row_min..stn_row - 1).rev() {
                 vert_count += 1f32;
                 horiz_count = 0f32;
                 for col in (stn_col - (vert_count as isize)..stn_col).rev() {
-                    if col >= 0 {
+                    if col >= col_min {
                         va = view_angle.get_value(row, col);
                         horiz_count += 1f32;
                         if horiz_count != vert_count {
@@ -497,11 +539,11 @@ impl WhiteboxTool for Viewshed {
 
             // solve the third triangular facet
             vert_count = 1f32;
-            for row in stn_row + 2..rows {
+            for row in stn_row + 2..row_max {
                 vert_count += 1f32;
                 horiz_count = 0f32;
                 for col in (stn_col - (vert_count as isize)..stn_col).rev() {
-                    if col >= 0 {
+                    if col >= col_min {
                         va = view_angle.get_value(row, col);
                         horiz_count += 1f32;
                         if horiz_count != vert_count {
@@ -524,11 +566,11 @@ impl WhiteboxTool for Viewshed {
 
             // solve the fourth triangular facet
             vert_count = 1f32;
-            for row in stn_row + 2..rows {
+            for row in stn_row + 2..row_max {
                 vert_count += 1f32;
                 horiz_count = 0f32;
                 for col in stn_col + 1..stn_col + (vert_count as isize) + 1 {
-                    if col < columns {
+                    if col < col_max {
                         va = view_angle.get_value(row, col);
                         horiz_count += 1f32;
                         if horiz_count != vert_count {
@@ -551,11 +593,11 @@ impl WhiteboxTool for Viewshed {
 
             // solve the fifth triangular facet
             vert_count = 1f32;
-            for col in stn_col + 2..columns {
+            for col in stn_col + 2..col_max {
                 vert_count += 1f32;
                 horiz_count = 0f32;
                 for row in (stn_row - (vert_count as isize)..stn_row).rev() {
-                    if row >= 0 {
+                    if row >= row_min {
                         va = view_angle.get_value(row, col);
                         horiz_count += 1f32;
                         if horiz_count != vert_count {
@@ -578,11 +620,11 @@ impl WhiteboxTool for Viewshed {
 
             // solve the sixth triangular facet
             vert_count = 1f32;
-            for col in stn_col + 2..columns {
+            for col in stn_col + 2..col_max {
                 vert_count += 1f32;
                 horiz_count = 0f32;
                 for row in stn_row + 1..stn_row + (vert_count as isize) + 1 {
-                    if row < rows {
+                    if row < row_max {
                         va = view_angle.get_value(row, col);
                         horiz_count += 1f32;
                         if horiz_count != vert_count {
@@ -605,11 +647,11 @@ impl WhiteboxTool for Viewshed {
 
             // solve the seventh triangular facet
             vert_count = 1f32;
-            for col in (0..stn_col - 1).rev() {
+            for col in (col_min..stn_col - 1).rev() {
                 vert_count += 1f32;
                 horiz_count = 0f32;
                 for row in stn_row + 1..stn_row + (vert_count as isize) + 1 {
-                    if row < rows {
+                    if row < row_max {
                         va = view_angle.get_value(row, col);
                         horiz_count += 1f32;
                         if horiz_count != vert_count {
@@ -632,11 +674,11 @@ impl WhiteboxTool for Viewshed {
 
             // solve the eighth triangular facet
             vert_count = 1f32;
-            for col in (0..stn_col - 1).rev() {
+            for col in (col_min..stn_col - 1).rev() {
                 vert_count += 1f32;
                 horiz_count = 0f32;
                 for row in (stn_row - (vert_count as isize)..stn_row).rev() {
-                    if row < rows {
+                    if row < row_max {
                         va = view_angle.get_value(row, col);
                         horiz_count += 1f32;
                         if horiz_count != vert_count {
@@ -658,8 +700,8 @@ impl WhiteboxTool for Viewshed {
             }
 
             let mut value: f64;
-            for row in 0..rows {
-                for col in 0..columns {
+            for row in row_min..row_max {
+                for col in col_min..col_max {
                     // z = max_view_angle.get_value(row, col);
                     // if z > -32768f32 {
                     //     output.set_value(row, col, z as f64);
@@ -678,16 +720,16 @@ impl WhiteboxTool for Viewshed {
                     }
                 }
 
-                if verbose {
-                    progress = (100.0_f64 * row as f64 / (rows - 1) as f64) as usize;
-                    if progress != old_progress {
-                        println!(
-                            "Creating output: (Station {} of {}): {}%",
-                            stn_num, num_stn, progress
-                        );
-                        old_progress = progress;
-                    }
-                }
+                //if verbose {
+                //    progress = (100.0_f64 * row as f64 / (rows - 1) as f64) as usize;
+                //    if progress != old_progress {
+                //        println!(
+                //            "Creating output: (Station {} of {}): {}%",
+                //            stn_num, num_stn, progress
+                //        );
+                //        old_progress = progress;
+                //    }
+                //}
             }
         }
 
