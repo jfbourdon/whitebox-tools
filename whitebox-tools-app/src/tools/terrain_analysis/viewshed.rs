@@ -37,9 +37,8 @@ use std::thread;
 /// Viewshed analysis is a very
 /// computationally intensive task. Depending on the size of the input DEM grid and the
 /// number of viewing stations, this operation may take considerable time to complete. Also,
-/// this implementation of the viewshed algorithm does not account for the curvature of the
-/// Earth. This should be accounted for if viewsheds are being calculated over very
-/// extensive areas.
+/// Earth curvature can be accounted for by providing the earth radius (`--radius`)
+/// in the same units than the horizontal and vertical units of the input DEM.
 ///
 /// # See Also
 /// `VisibilityIndex`
@@ -103,6 +102,15 @@ impl Viewshed {
             description: "Optional maximum viewing distance, in horizontal units.".to_owned(),
             parameter_type: ParameterType::Float,
             default_value: None,
+            optional: true,
+        });
+
+        parameters.push(ToolParameter {
+            name: "Earth radius (in vertical and horizontal units)".to_owned(),
+            flags: vec!["--radius".to_owned()],
+            description: "Optional earth radius to account for its curvature, in vertical and horizontal units.".to_owned(),
+            parameter_type: ParameterType::Float,
+            default_value: Some("0.0".to_owned()),
             optional: true,
         });
 
@@ -177,6 +185,8 @@ impl WhiteboxTool for Viewshed {
         let mut output_file = String::new();
         let mut height = 2.0;
         let mut max_dist = f64::INFINITY;
+        let mut radius = 0.0;
+
 
         if args.len() == 0 {
             return Err(Error::new(
@@ -226,6 +236,18 @@ impl WhiteboxTool for Viewshed {
                 };
             } else if flag_val == "-max_dist" {
                 max_dist = if keyval {
+                    vec[1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                } else {
+                    args[i + 1]
+                        .to_string()
+                        .parse::<f64>()
+                        .expect(&format!("Error parsing {}", flag_val))
+                };
+            } else if flag_val == "-radius" {
+                radius = if keyval {
                     vec[1]
                         .to_string()
                         .parse::<f64>()
@@ -288,6 +310,11 @@ impl WhiteboxTool for Viewshed {
         if max_dist < 0f64 {
             println!("Warning: Maximum viewing distance cannot be less than zero.");
             max_dist = f64::INFINITY;
+        }
+
+        if radius < 0f64 {
+            println!("Warning: Earth radius cannot be less than zero.");
+            radius = 0f64;
         }
 
         let rows = dem.configs.rows as isize;
@@ -399,9 +426,10 @@ impl WhiteboxTool for Viewshed {
                             if z != nodata {
                                 x = dem.get_x_from_column(col);
                                 y = dem.get_y_from_row(row);
-                                dz = z - stn_z;
                                 dist =
                                     ((x - stn_x) * (x - stn_x) + (y - stn_y) * (y - stn_y)).sqrt();
+                                let z_drop = if radius > 0.0 {dist*dist / (2f64 * radius)} else {0.0};
+                                dz = z - stn_z - z_drop;
                                 if dist != 0.0 {
                                     data[col as usize] = (dz / dist * 1000f64) as f32;
                                 } else {
