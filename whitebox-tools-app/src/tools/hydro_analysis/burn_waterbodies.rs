@@ -297,8 +297,7 @@ impl WhiteboxTool for BurnWaterbodies {
         );
 
 
-        //// EMPÊCHER LA RASTERISATION DANS LE NODATA DU DEM !!!!
-        /// À AJOUTER!!!  JE CROIS QUE ÇA VA RÉGLER MON PROBLÈME AVEC LES VALEURS TROP FAIBLES DANS LES SURFACES QUI DÉPASSENT
+
 
         let mut rasterized: Array2D<i8> = Array2D::new(rows, columns, -1i8, -1i8)?;
         let mut holes: Array2D<i32> = Array2D::new(rows, columns, -1i32, -1i32)?;
@@ -547,6 +546,8 @@ impl WhiteboxTool for BurnWaterbodies {
         /// Début de l'opération de region-growing à partir d'un point d'exutoire
         //////
         let mut visited: Array2D<u8> = Array2D::new(rows, columns, 0u8, 0u8)?;
+        let mut backlink: Array2D<i8> = Array2D::new(rows, columns, -1i8, -2i8)?;
+        let backlink_dir = [4i8, 5, 6, 7, 0, 1, 2, 3];
         let dx = [1, 1, 1, 0, -1, -1, -1, 0];
         let dy = [-1, 0, 1, 1, 1, 0, -1, -1];
 
@@ -569,7 +570,6 @@ impl WhiteboxTool for BurnWaterbodies {
             // et sauvegarder le nombre total de cellules modifiées. En fait, mieux de repasser à travers
             // "rasterized" et counter le nombre différent de nodata car sinon j'aurais des superpositions.
             let mut next_queue: VecDeque<(isize, isize, usize)> = VecDeque::with_capacity(nb_visited_cells);
-            //let mut maxheap  = BinaryHeap::with_capacity(nb_visited_cells);
             let mut maxheap: BinaryHeap<(GridCell)> = BinaryHeap::with_capacity(nb_visited_cells);
 
             for no_pt in 0..record.num_points as usize {
@@ -592,8 +592,10 @@ impl WhiteboxTool for BurnWaterbodies {
                 for n in 0..8 {
                     let row = cell.0 + dy[n];
                     let col = cell.1 + dx[n];
-                    if rasterized.get_value(row, col) != rasterized.nodata &&  // Voir à combiner "rasterized" et "visited"
-                    visited.get_value(row, col) == visited.nodata {
+                    if rasterized.get_value(row, col) != rasterized.nodata  // Voir à combiner "rasterized" et "visited"
+                        && visited.get_value(row, col) == visited.nodata
+                    {
+                        backlink.set_value(row, col, backlink_dir[n]);  // indique la direction que doit prendre la cellule voisine pour se rendre à "cell"
                         next_queue.push_back((row, col, next_priority));
                         visited.set_value(row, col, 1u8);
                     }
@@ -609,13 +611,22 @@ impl WhiteboxTool for BurnWaterbodies {
                 let col = cell.column;
                 let mut z = dem.get_value(row, col);
 
-                // Recherche de la valeur d'élévation la plus faible parmi les voisins
+
+                // Abaissement de la cellule centrale par rapport aux
+                // cellules situées en amont uniquement
+                // En théorie, en raison du maxheap, ces cellules en amont devraient
+                // déjà avoir été abaissées si nécessaire.
                 for n in 0..8 {
                     let row2 = row + dy[n];
                     let col2 = col + dx[n];
-                    let zn = dem.get_value(row2, col2);
-                    if zn != dem.configs.nodata && zn < z {
-                        z = zn;
+                    let idx_backlink = backlink.get_value(row2, col2);
+                    if idx_backlink >= 0i8 {
+                        if row2 + dy[idx_backlink as usize] == row && col2 + dx[idx_backlink as usize] == col {
+                            let zn = dem.get_value(row2, col2);
+                            if zn != dem.configs.nodata && zn < z {
+                                z = zn;
+                            }
+                        }
                     }
                 }
                 dem.set_value(row, col, z - flat_increment);
