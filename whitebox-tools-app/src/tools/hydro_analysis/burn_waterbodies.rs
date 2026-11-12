@@ -96,8 +96,7 @@ impl BurnWaterbodies {
         if e.contains(".exe") {
             short_exe += ".exe";
         }
-        let usage = format!(">>.*{0} -r={1} -v --wd=\"*path*to*data*\" -i=lakes.shp --field=ELEV -o=output.tif --nodata --cell_size=10.0
-        >>.*{0} -r={1} -v --wd=\"*path*to*data*\" -i=lakes.shp --field=ELEV -o=output.tif --base=existing_raster.tif", short_exe, name).replace("*", &sep);
+        let usage = format!(">>.*{0} -r={1} -v --wd=\"*path*to*data*\" --waterbodies=lakes.shp --ouetlets=outlets.shp --dem=dem.tif -o=output.tif", short_exe, name).replace("*", &sep);
 
         BurnWaterbodies {
             name: name,
@@ -635,26 +634,6 @@ impl WhiteboxTool for BurnWaterbodies {
 
 
 
-        /* 
-        let s : &str = "F:\\06aj_026\\visited.tif";
-        let mut output_raster = Raster::initialize_using_file(&s, &dem);
-        output_raster.configs.data_type = DataType::U32;
-        for row in 0..rows {
-            for col in 0..columns {
-                output_raster.set_value(row, col, visited.get_value(row, col) as f64);
-            }
-        }
-        let _ = match output_raster.write() {
-            Ok(_) => {
-                if verbose {
-                    println!("Output output_raster VISITED")
-                }
-            }
-            Err(e) => return Err(e),
-        };
-        */
-
-
 
         // Redirect DEM raster to the output file
         // Force F64 to ensure correct increment values
@@ -685,7 +664,7 @@ impl WhiteboxTool for BurnWaterbodies {
         };
 
         if !output_something && verbose {
-            println!("Warning: No polygons were output to the raster.");
+            println!("Warning: No polygons were burned into the raster.");
         }
 
         if verbose {
